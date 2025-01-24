@@ -1,0 +1,110 @@
+/**
+ * This solves
+ *  u_xx + u_yy = f
+ * on Omega = [0, 1] x [0, 1]
+ * with Dirichlet boundary conditions, e.g. u = g on the boundary of Omega.
+ *
+ * The technique uses a Gauss-Seidel update with successive overrelaxation.
+ * We use red-black ordering so we can parallelise it. This is not exactly the 
+ * same as the sequential Gauss-Seidel, but the convergence is similar.
+ **/
+
+use StdIO: all;
+use Math: all;
+use Array: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x) / prod(tod(shp)));
+}
+
+double l_inf(double[d:shp] x)
+{
+  return with {
+      (0 * shp <= iv < shp): abs(x[iv]);
+  }: fold(max, 0d);
+}
+
+inline
+double[n, n] sor(double[n, n] u, double h, double[n, n] f)
+{
+  pi     = 4d * atan(1d);
+  omega = 2d / (1d + sin(pi * h));
+
+  u = with {
+        ([1, 1] <= [i, j] < [n - 1, n - 1] step [2, 2]): 
+                                                omega / 4d * (u[i - 1, j    ] +
+                                                              u[i    , j - 1] +
+                                                              u[i    , j + 1] +
+                                                              u[i + 1, j    ] -
+                                                              h * h * f[i, j]) +
+
+                  (1d - omega) * u[i, j];
+        ([2, 2] <= [i, j] < [n - 1, n - 1] step [2, 2]): 
+                                                omega / 4d * (u[i - 1, j    ] +
+                                                              u[i + 1, j    ] +
+                                                              u[i    , j - 1] +
+                                                              u[i    , j + 1] -
+                                                              h * h * f[i, j]) +
+                  (1d - omega) * u[i, j];
+      }: modarray(u);
+
+  u = with {
+        ([1, 2] <= [i, j] < [n - 1, n - 1] step [2, 2]): 
+                                               omega / 4d * (u[i - 1, j    ] +
+                                                             u[i + 1, j    ] +
+                                                             u[i    , j - 1] +
+                                                             u[i    , j + 1] -
+                                                             h * h * f[i, j]) +
+                  (1d - omega) * u[i, j];
+        ([2, 1] <= [i, j] < [n - 1, n - 1] step [2, 2]): 
+                                               omega / 4d * (u[i - 1, j    ] +
+                                                             u[i + 1, j    ] +
+                                                             u[i    , j - 1] +
+                                                             u[i    , j + 1] -
+                                                             h * h * f[i, j]) +
+                  (1d - omega) * u[i, j];
+      }: modarray(u);
+  return u;
+}
+
+int main()
+{
+  n      = 1024;
+  pi     = 4d * atan(1d);
+  two_pi = 8d * atan(1d);
+  h      = 1d / tod(n + 1);
+  omega  = 2d / (1d + sin(pi * h));
+
+  f = {[i, j] -> 1.25 * exp(tod(i) * h + tod(j) * h / 2d)
+              | [i, j] < [n, n]};
+  utrue = {[i, j] -> exp(tod(i) * h + tod(j) * h / 2d)
+              | [i, j] < [n, n]};
+  u = {[i, j] -> 0d | [i, j] < [n, n]};
+
+  for (i = 0; i < n; i++) {
+    u[0    , i]     = utrue[0    , i];
+    u[n - 1, i]     = utrue[n - 1, i];
+    u[i, 0    ]     = utrue[i    , 0    ];
+    u[i, n - 1]     = utrue[i    , n - 1];
+  }
+
+
+  i = 0;
+  while (L2(u - utrue) / L2(utrue) > 1e-6) {
+    u = sor(u, h, f);
+    if (i % 100 == 0) {
+      printf("Iter %d: relative error is %e\n", i, L2(u - utrue) / L2(utrue));
+    }
+    i++;
+  }
+
+  return 0;
+}
