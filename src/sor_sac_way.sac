@@ -14,28 +14,10 @@
 use StdIO: all;
 use Math: all;
 use Array: all;
-inline
-double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
-{
-  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
-             | iv < shp};
-}
-
-double L2(double[d:shp] x)
-{
-  return sqrt(sum(x * x) / prod(tod(shp)));
-}
 
 double L2_rb(double[d:shp] x, double[d:shp] y)
 {
   return sqrt((sum(x * x) + sum(y * y)) / (2d * prod(tod(shp))));
-}
-
-double l_inf(double[d:shp] x)
-{
-  return with {
-      (0 * shp <= iv < shp): abs(x[iv]);
-  }: fold(max, 0d);
 }
 
 inline
@@ -113,11 +95,10 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 
 int main()
 {
-  n      = 2048;
-  pi     = 4d * atan(1d);
-  two_pi = 8d * atan(1d);
-  h      = 1d / tod(n + 1);
-  omega  = 2d / (1d + sin(pi * h));
+  a = 1d;
+  b = 2d;
+  n = 2048;
+  h = (b - a) / tod(n + 1);
 
   f = {[i, j] -> 1.25 * exp(tod(i) * h + tod(j) * h / 2d)
               | [i, j] < [n, n]};
@@ -125,6 +106,7 @@ int main()
               | [i, j] < [n, n]};
   u = {[i, j] -> 0d | [i, j] < [n, n]};
 
+  /* Set boundary conditions */
   for (i = 0; i < n; i++) {
     u[0    , i]     = utrue[0    , i];
     u[n - 1, i]     = utrue[n - 1, i];
@@ -145,8 +127,7 @@ int main()
     if (i % 100 == 0) {
       error = L2_rb(u_red - utrue_red, u_black - utrue_black) / 
               L2_rb(utrue_red, utrue_black);
-      printf("Iter %d: relative error is %e\n", 
-              i, error);
+      printf("Iter %d: relative error is %e\n", i, error);
     }
     i++;
   }

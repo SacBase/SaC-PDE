@@ -5,14 +5,14 @@
  * and similar for y.
  * 
  * Example:
- * Let u(x, y) = sin(x) + sin(y)
+ * Let u(x, y) = exp(x + y / 2)
  * Then 
- *     u_x    = cos(x), u_xx = -sin(x)
- *     u_y    = cos(y), u_yy = -sin(y)
- * Laplacian u = -sin(x) - sin(y).
+ *     u_x    = exp(x + y / 2), u_xx = exp(x + y / 2)
+ *     u_y    = 0.5 exp(x + y / 2), u_yy = 0.25 exp(x + y / 2)
+ * Laplacian u = 1.25 exp(x + y / 2)
  *
- * We can approximate functions R x R -> R on a square grid [0, a] x [0, a]
- * by computing points at (i * h, j * h) for h = 0, ..., a / n.
+ * We can approximate functions R x R -> R on a square grid [a, b] x [a, b]
+ * by computing points at (a + i * h, b + j * h) for h = (b - a) / (n + 1).
  *
  * We can approximate the Laplacian by a linear function called the five-point
  * stencil. The error between the Laplacian and five-point stencil is
@@ -24,10 +24,7 @@
  *   We do not know the true value of u(x - h) or u(x + h), but instead have
  *   a computed value that is slightly wrong. That means we get catastrophic
  *   cancellation for u(x - h) close to u(x + h), which is bound to happen
- *   for small h. For this reason we should not take h too small. A good
- *   balance between the truncation error and this instability is to take
- *   h around the square root of the machine precision (2^{-53} for double,
- *   2^{-24} for float).
+ *   for small h. For this reason we should not take h too small.
  **/
 
 use StdIO: all;
@@ -37,20 +34,14 @@ use Array: all;
 inline
 double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
 {
-  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
-             | iv < shp};
+  return {iv -> sum({jv -> w[jv] * x[iv + jv - wshp / 2]})
+             | wshp / 2 <= iv < shp - wshp / 2;
+          iv -> x[iv]};
 }
 
 double L2(double[d:shp] x)
 {
   return sqrt(sum(x * x) / prod(tod(shp)));
-}
-
-double l_inf(double[d:shp] x)
-{
-  return with {
-      (0 * shp <= iv < shp): abs(x[iv]);
-  }: fold(max, 0d);
 }
 
 double[n, n] five_point(double[n, n] U, double h)
@@ -62,22 +53,23 @@ double[n, n] five_point(double[n, n] U, double h)
 
 int main()
 {
-  for (n = 64; n <= 16 * 1024; n *= 2) {
-      two_pi = 8d * atan(1d);
-      h      = two_pi / tod(n);
-#if 0
-      /* Incorrect around boundaries */
-      U = {[i, j] -> exp(tod(i) * h + tod(i) * h / 2d) | [i, j] < [n, n]};
-      Laplace_U = 1.25 * U;
-#else
-      U = {[i, j] -> sin(tod(i) * h) +
-                     sin(tod(j) * h)
-                  | [i, j] < [n, n]};
-      Laplace_U = -U;
-#endif
+  a = 1d;
+  b = 2d;
+
+  for (n = 8; n <= 16 * 1024; n *= 2) {
+      h = (b - a) / tod(n + 1);
+      u = {[i, j] -> exp(tod(i) * h + tod(j) * h / 2d) | [i, j] < [n, n]};
+      laplace_u = 1.25 * u;
+      laplace_u_approx = five_point(u, h);
+      /* Assume we know values on boundary */
+      for (i = 0; i < n; i++) {
+        laplace_u_approx[0    , i    ] = laplace_u[0    , i    ];
+        laplace_u_approx[n - 1, i    ] = laplace_u[n - 1, i    ];
+        laplace_u_approx[i    , 0    ] = laplace_u[i    , 0    ];
+        laplace_u_approx[i    , n - 1] = laplace_u[i    , n - 1];
+      }
       printf("n = %8d, relative error: %e\n",
-             n,
-             L2(five_point(U, h) - Laplace_U) / L2(five_point(Laplace_U, h)));
+             n, L2(laplace_u_approx - laplace_u) / L2(laplace_u));
   }
 
   return 0;
