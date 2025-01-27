@@ -1,10 +1,10 @@
 SAC2C     = sac2c_d
 SAC_FLAGS = -maxwlur 9 #-check tc
 
-SEQ      = $(patsubst src/%.sac, bin/%_seq,     $(filter-out src/red_black_sor.sac, $(wildcard src/*.sac)))
-MT       = $(patsubst src/%.sac, bin/%_mt,      $(filter-out src/red_black_sor.sac, $(wildcard src/*.sac)))
-CUDA     = $(patsubst src/%.sac, bin/%_cuda,    $(filter-out src/red_black_sor.sac, $(wildcard src/*.sac)))
-DISTMEM  = $(patsubst src/%.sac, bin/%_distmem, $(filter-out src/red_black_sor.sac, $(wildcard src/*.sac)))
+SEQ      = $(patsubst src/%.sac, bin/%_seq,     $(wildcard src/*.sac))
+MT       = $(patsubst src/%.sac, bin/%_mt,      $(wildcard src/*.sac))
+CUDA     = $(patsubst src/%.sac, bin/%_cuda,    $(wildcard src/*.sac))
+DISTMEM  = $(patsubst src/%.sac, bin/%_distmem, $(wildcard src/*.sac))
 
 all: seq mt
 

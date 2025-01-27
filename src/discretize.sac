@@ -5,14 +5,21 @@
  * and similar for y.
  * 
  * Example:
- * Let u(x, y) = exp(x + y / 2)
+ * Let u(x, y) = sin(x + y);
  * Then 
- *     u_x    = exp(x + y / 2), u_xx = exp(x + y / 2)
- *     u_y    = 0.5 exp(x + y / 2), u_yy = 0.25 exp(x + y / 2)
- * Laplacian u = 1.25 exp(x + y / 2)
+ *     u_x    = cos(x + y), u_xx = -sin(x + y)
+ *     u_y    = cos(x + y), u_yy = -sin(x + y)
+ * Laplacian u = -2u
  *
  * We can approximate functions R x R -> R on a square grid [a, b] x [a, b]
- * by computing points at (a + i * h, b + j * h) for h = (b - a) / (n + 1).
+ * by computing points at (a + i * h, b + j * h) for h = (b - a) / n.
+ * We assume periodic boundary conditions, e.g. 
+ *     f([a, b] x {a})    = f([a, b] x {b})
+ *     f({a}    x [a, b]) = f({b}    x [a, b])
+ *
+ * Another possibility is Dirichlet boundary conditions, where the result
+ * on the boundary of Omega is known. In that case we divide by (n + 1) to
+ * get the interior of grid points.
  *
  * We can approximate the Laplacian by a linear function called the five-point
  * stencil. The error between the Laplacian and five-point stencil is
@@ -34,9 +41,8 @@ use Array: all;
 inline
 double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
 {
-  return {iv -> sum({jv -> w[jv] * x[iv + jv - wshp / 2]})
-             | wshp / 2 <= iv < shp - wshp / 2;
-          iv -> x[iv]};
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
 }
 
 double L2(double[d:shp] x)
@@ -51,23 +57,28 @@ double[n, n] five_point(double[n, n] U, double h)
                      [0d,  1d, 0d]]) / (h * h);
 }
 
+double f(double x, double y)
+{
+  return sin(x + y);
+}
+
+double u(double x, double y)
+{
+  return -2d * f(x, y);
+}
+
 int main()
 {
-  a = 1d;
-  b = 2d;
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
 
   for (n = 8; n <= 16 * 1024; n *= 2) {
-      h = (b - a) / tod(n + 1);
-      u = {[i, j] -> exp(tod(i) * h + tod(j) * h / 2d) | [i, j] < [n, n]};
-      laplace_u = 1.25 * u;
+      h = (b - a) / tod(n);
+      u = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
+                   | [i, j] < [n, n]};
+      laplace_u = -2d * u;
       laplace_u_approx = five_point(u, h);
-      /* Assume we know values on boundary */
-      for (i = 0; i < n; i++) {
-        laplace_u_approx[0    , i    ] = laplace_u[0    , i    ];
-        laplace_u_approx[n - 1, i    ] = laplace_u[n - 1, i    ];
-        laplace_u_approx[i    , 0    ] = laplace_u[i    , 0    ];
-        laplace_u_approx[i    , n - 1] = laplace_u[i    , n - 1];
-      }
       printf("n = %8d, relative error: %e\n",
              n, L2(laplace_u_approx - laplace_u) / L2(laplace_u));
   }
