@@ -85,6 +85,23 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 {
   /** 
    * TODO: can we express this as a single stencil?
+   * Probably not, higher-dimensional Laplacian's are tensor products of
+   * 1D Laplacians. We can see the RB ordering as an isomorphism
+   *    R^n <-> R^(n / 2) \oplus R^(n / 2)
+   * that corresponds with the cyclic-block ordering.
+   *
+   * So the tensor product becomes
+   *    R^n \otimes <-> \bigotimes (R^(n / 2) \oplus R^(n / 2)) <->
+   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
+   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
+   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
+   *    (R^(n / 2) \otimes R^(n / 2))
+   *
+   * So we really have four pure tensor products (the 5-point stencil is
+   * the tensor product of the 1D stencil [1, 2, 1]).
+   * The current implementation distributes the tensor product differently,
+   * getting only two direct-sums. But the direct sum of two tensor products of
+   * stencils is not necessarily a tensor product itself.
    **/
   w_left  = [[0d, 1d, 0d],
              [1d, 1d, 0d],
