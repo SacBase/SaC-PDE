@@ -1,0 +1,172 @@
+/**
+ * This solves
+ *  u_xx + u_yy = f
+ * on Omega = [0, 1] x [0, 1]
+ * with periodic boundary conditions.
+ *
+ * The technique uses a Gauss-Seidel update with successive overrelaxation.
+ * We use red-black ordering so we can parallelise it.
+ **/
+
+use StdIO: all;
+use Math: all;
+use Array: all;
+use Benchmarking: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+double f(double x)
+{
+  return -sin(x);
+}
+
+double u(double x)
+{
+  return sin(x);
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x));
+}
+
+double[n] to_red_black(double[n] x)
+{
+  return reshape([n], transpose(reshape([n / 2, 2], x)));
+}
+
+double[n] from_red_black(double[n] x)
+{
+  return reshape([n], transpose(reshape([2, n / 2], x)));
+}
+
+/**
+ * (We ignore the 1 / h^2 factor for typographic clarity.)
+ * We use red-black order, so in matrix form
+ *
+ *  A = -2I   B
+ *      B^t  -2I
+ * where I is the identity, B is a band of ones at the diagonal and subdiagonal. 
+ *
+ * or explicitly (easier to reason with when taking tensor products)
+ *
+ * A: e_i           -> -2e_i + 
+ *                     e_(n / 2 + (i - 1) mod (n / 2)) + 
+ *                     e_(n / 2 + (i    ) mod (n / 2))
+ *    e_(i + n / 2) -> -2e_(i + n / 2) +
+ *                     e_((i    ) mod (n / 2)) + 
+ *                     e_((i + 1) mod (n / 2))
+ *
+ * This method is based on splitting A into M - N
+ * We want to solve the system 
+ * Au = (M - N)u = f <=>
+ * Mu = Nu + f
+ * which gives the update formula
+ * Mu^(k + 1) = Nu^(k) + f.
+ *
+ * We choose in matrix form
+ *
+ * M = 1/omega * | 2I          0  |
+ *               | omega B^t   2I |
+ *
+ * and
+ *
+ * N = 1/omega * | (1 - omega) * 2I  -omega B         |
+ *               | 0                 (1 - omega) * 2I |
+ *
+ * or
+ * 
+ * M: e_i           -> 2 / omega * e_i
+ * M: e_(i + n / 2) -> 2 / omega * e_(i + n / 2) + 
+ *                      e_((i - 1) mod (n / 2)) + 
+ *                      e_((i    ) mod (n / 2))
+ *
+ * Note that M^(-1) = 
+ *
+ *   omega / 2 * | I               0 |
+ *               | -omega / 2 B^t  I |
+ *
+ *
+ * Splitting R^n into R^(n / 2) \oplus R^(n / 2)  (black red)
+ * we have
+ * N [u_black, u_red]^t = [2(1 - omega) u_black - omega B u_red,
+ *                         2(1 - omega) u_red] / omega
+ * M^(-1) (N [u_black, u_red]^t + [f_black, f_red]^t) =
+ * 0.5 * [2(1 - omega) u_black - omega B u_red + f_black,
+ *        -omega B^t / 2 (expression above) + 2(1 - omega) (u_red + f_red)]
+ *    
+ *
+ * So we can update the black part first, and then use that result to update the
+ * red part.
+ **/
+inline
+double[n] sor(double[n] u, double[n] f, double h, double omega)
+{
+  /**
+   * Matches STREAM in parallel
+   **/
+  update_red = stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
+  u = with {
+        ([0] <= iv < [n / 2]): 
+                (1d - omega) * u[iv] +
+                omega / 2d * (update_red[iv] + h * h * f[iv]);
+      }: modarray(u);
+
+  update_black = stencil(tile([n / 2], [0], u), [0d, 1d, 1d]);
+  u = with {
+        ([n / 2] <= iv < [n]):
+              (1d - omega) * u[iv] + 
+                  omega / 2d * (update_black[iv - [n / 2]] + h * h * f[iv]);
+      }: modarray(u);
+
+  return u;
+}
+
+int main()
+{
+  i_sor = getInterval("sor", 2);
+  start(i_sor);
+
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2000d * pi;
+  n = 2048000;
+  h = (b - a) / tod(n);
+
+  F = {[i] -> f(a + tod(i) * h) | [i] < [n]};
+  Utrue = {[i] -> u(a + tod(i) * h) | [i] < [n]};
+  U = {[i] -> 0d | [i] < [n]};
+
+  U     = to_red_black(U);
+  F     = to_red_black(F);
+  Utrue = to_red_black(Utrue);
+
+  pi    = 4d * atan(1d);
+  omega = 2d / (1d + sin(pi * h));
+  i     = 0;
+  error = 1e308;
+  while (error > 1e-6)
+  {
+    U = sor(U, F, h, omega);
+    if (i % 100 == 0) {
+      error = L2(U - F) / L2(F);
+      printf("Iter %d: relative error is %e\n", i, error);
+    }
+    i++;
+  }
+
+  end(i_sor);
+  time, unit = returnResultUnit(i_sor);
+  gb_moved = tod(i) * 8d * 
+              (prod(tod(shape(F))) +  // read
+              2d * prod(tod(shape(U))))  // read and write
+              / 1e9;
+  printf("Bandwidth: %lf GB/s\n", gb_moved / time);
+
+  return 0;
+}
