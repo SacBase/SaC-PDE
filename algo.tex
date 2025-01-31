@@ -70,20 +70,30 @@ We parameterize by $\omega$.
 
 \begin{align*}
     M : & \\
-    e^b_{i} \mapsto & \frac{1}{\omega}\big(2 e^b_{i} + \omega e^r_{(i - 1) \mod n / 2} + \omega e^r_{i \mod n / 2} \big) \\
-    e^r_{i} \mapsto &  \frac{2}{\omega}e^r_{i}
+    e^b_{i} \mapsto & -\frac{2}{\omega}\cdot e^b_{i} \\
+    e^r_{i} \mapsto & -\frac{2}{\omega}\big(e^r_{i} - \frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
 \end{align*}
 
 \begin{align*}
     N : & \\
-    e^b_{i} \mapsto & \frac{2}{\omega}\big((1 - \omega)e^b_{i}\big) \\
-    e^r_{i} \mapsto & \frac{2}{\omega}\big((1 - \omega)e^r_{i} -\frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) 
+    e^b_{i} \mapsto & -\frac{2}{\omega}\big((1 - \omega)e^b_{i} + \frac{\omega}{2} (e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2}) \big) \\
+    e^r_{i} \mapsto & -\frac{2}{\omega}(1 - \omega)e^r_{i} \\
 \end{align*}
 
 \begin{align*}
     M^{-1} : & \\
-    e^b_{i} \mapsto & \frac{\omega}{2}\big(e^b_{i} - \frac{\omega}{2} (e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2}) \big) \\
-    e^r_{i} \mapsto & \frac{\omega}{2} e^r_{i}
+    e^b_{i} \mapsto & -\frac{\omega}{2} e^b_{i} \\
+    e^r_{i} \mapsto & -\frac{\omega}{2}\big(e^r_{i} - (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
+\end{align*}
+
+
+To check this is an inverse: trivial on the black part.
+
+\begin{align*}
+    e^r_i \xrightarrow{M} -\frac{2}{\omega}\big(e^r_{i} - \frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) = \\
+    -\frac{2}{\omega}e^r_i + e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2} \xrightarrow{M^{-1}}  \\
+    -\frac{2}{\omega} \cdot -\frac{\omega}{2}\big(e^r_{i} - (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
+    - \frac{\omega}{2}\left(e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}\right) = e^r_i
 \end{align*}
 
 We write $S[a, b, c]$ for the stencil function 
