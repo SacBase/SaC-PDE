@@ -40,11 +40,6 @@ double[n] to_red_black(double[n] x)
   return reshape([n], transpose(reshape([n / 2, 2], x)));
 }
 
-double[n] from_red_black(double[n] x)
-{
-  return reshape([n], transpose(reshape([2, n / 2], x)));
-}
-
 /**
  * (We ignore the 1 / h^2 factor for typographic clarity.)
  * We use red-black order, so in matrix form
@@ -110,6 +105,23 @@ double[n] sor(double[n] u, double[n] f, double h, double omega)
   /**
    * Matches STREAM in parallel
    **/
+  /* Nu + f */
+  BB  = 2d / omega * (1d - omega) * tile([n / 2], [0], u);
+  RB  = stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
+  RR  = 2d / omega * (1d - omega) * tile([n / 2], [n / 2], u);
+  Nu  = (BB + RB) ++ RR;
+  Nuf = Nu + h * h * f;
+
+  /* M^{-1}(Nu + f) */
+  BR = omega / 2d * stencil(tile([n / 2], [0], Nuf), [0d, 1d, 1d]);
+  RR = omega / 2d * tile([n / 2], [n / 2], Nuf);
+  BB = omega / 2d * tile([n / 2], [0], Nuf);
+  u  = BB ++ (RR + omega / 2d * BR);
+
+#if 0
+  /**
+   * Matches STREAM in parallel
+   **/
   update_red = stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
   u = with {
         ([0] <= iv < [n / 2]): 
@@ -123,6 +135,21 @@ double[n] sor(double[n] u, double[n] f, double h, double omega)
               (1d - omega) * u[iv] + 
                   omega / 2d * (update_black[iv - [n / 2]] + h * h * f[iv]);
       }: modarray(u);
+#endif
+#if 0
+  /* Nu + f */
+  RB  = -omega / 2d * stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
+  RR  = 2d / omega * (1d - omega) * tile([n / 2], [n / 2], u);
+  BB  = 2d / omega * (1d - omega) * tile([n / 2], [0], u);
+  Nu  = (BB + RB) ++ RR;
+  Nuf = Nu + h * h * f;
+
+  /* M^{-1} (Nu + f) */
+  BB = -omega / 2d * tile([n / 2], [0], Nuf);
+  BR = omega / 2d * stencil(tile([n / 2], [0], Nuf), [0d, 1d, 1d]);
+  RR = omega / 2d * tile([n / 2], [n / 2], Nuf);
+  u  = BB ++ (BR + RR);
+#endif
 
   return u;
 }

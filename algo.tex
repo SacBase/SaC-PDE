@@ -1,0 +1,143 @@
+\documentclass{article}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz-cd}
+
+\usepackage{color}
+
+\begin{document}
+
+\textcolor{red}{Work in progress, not in readable state yet.}
+
+\section{Background}
+
+In the category of vector spaces, $\oplus$ is both the product and coproduct.
+It distributes over tensor products. We write $a \prod b$ for the map induced
+by the product (e.g. $\iota_1(a(x)) + \iota_2(b(x))$) and $a \coprod b$ for the 
+one induced by the coproduct (e.g. $a(\pi_1(x)) + b(\pi_2(x))$).
+
+\section{1D}
+
+We write $\{e_0, \cdots, e_{n - 1}\}$ for the standard basis of $\mathbb{R}^n$.
+The one-dimensional discretization of $\nabla$ (periodic boundary conditions)
+is $A / h^2$ for
+
+\[
+A: e_{i} \mapsto e_{(i - 1) \mod n} - 2 e_{i} + e_{(i + 1) \mod n}.
+\]
+
+We want to solve $(A / h^2)u = f$ or equivalently $Au = h^2 f$.
+
+Let $\sigma: \mathbb{R}^n \to \mathbb{R}^n$ be the red-black reordering, so
+
+\begin{align*}
+    \sigma: & e_{2i} \mapsto e_{i} \\
+            & e_{2i + 1} \mapsto e_{i + n / 2}
+\end{align*}
+
+Then the red-black form of $A$ is
+
+\begin{align*}
+    A^{rb} := \sigma A \sigma^{-1} & & \\
+    e_{i} \mapsto & -2e_{i} + e_{n / 2 + (i - 1) \mod n / 2} & i < n / 2 \\
+          & + e_{n / 2 + i \mod n / 2} &  \\ 
+    e_{i + n / 2} \mapsto & -2e_{i + n / 2} + e_{i \mod n / 2} & i \geq n / 2 \\
+          & + e_{(i + 1) \mod n / 2} &  \\ 
+\end{align*}
+
+We can work more naturally by looking through the lense 
+$\mathbb{R}^{n / 2} \oplus \mathbb{R}^{n / 2} \cong \mathbb{R}^{n}$.
+We write $\{e^b_0, \cdots e^b_{n / 2 - 1}\}$ for the basis of the first copy
+(black), and $\{e^r_0, \cdots e^r_{n / 2 - 1}\}$ (red). The inclusions are
+$e^b_i \mapsto e_i, \quad e^r_i \mapsto e_{i + n / 2}$.
+
+\newpage
+
+In this notation
+
+\begin{align*}
+    A^{rb} & \\
+    e^b_{i} \mapsto & -2e^b_{i} + e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2} \\
+    e^r_{i} \mapsto & -2e^r_{i} + e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2} \\ 
+\end{align*}
+
+We split $A^{rb} = M - N$, so we can write $A^{rb}u = h^2f \iff Mu = Nu + h^2f$,
+so we can use update formula $u^{(k + 1)} = M^{-1}(Nu^{(k)} + h^2f)$.
+
+
+We parameterize by $\omega$.
+
+\begin{align*}
+    M : & \\
+    e^b_{i} \mapsto & \frac{1}{\omega}\big(2 e^b_{i} + \omega e^r_{(i - 1) \mod n / 2} + \omega e^r_{i \mod n / 2} \big) \\
+    e^r_{i} \mapsto &  \frac{2}{\omega}e^r_{i}
+\end{align*}
+
+\begin{align*}
+    N : & \\
+    e^b_{i} \mapsto & \frac{2}{\omega}\big((1 - \omega)e^b_{i}\big) \\
+    e^r_{i} \mapsto & \frac{2}{\omega}\big((1 - \omega)e^r_{i} -\frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) 
+\end{align*}
+
+\begin{align*}
+    M^{-1} : & \\
+    e^b_{i} \mapsto & \frac{\omega}{2}\big(e^b_{i} - \frac{\omega}{2} (e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2}) \big) \\
+    e^r_{i} \mapsto & \frac{\omega}{2} e^r_{i}
+\end{align*}
+
+We write $S[a, b, c]$ for the stencil function 
+
+\[
+    e_i \mapsto ae_{(i - 1) \mod n} + be_{i \mod n} + c e_{(i + 1) \mod n}
+\]
+
+and $a$ for $x \mapsto ax$. With this notation, we can represent $A$ as 
+commutative diagram
+
+\begin{tikzcd}[column sep = huge, row sep = huge]
+    B \arrow[d, "\frac{2}{\omega}(1 - \omega)"'] \arrow[r, "\iota_1"]& 
+        R \oplus B \arrow[d, dotted, pos = 0.4, "N"']& 
+        R \arrow[dll, pos = 0.3, "{-\frac{\omega}{2}S[0, 1, 1]}"] 
+        \arrow[d, "\frac{2}{\omega}(1 - \omega)"] \arrow[l, "\iota_2"'] \\
+    B \arrow[d, "\frac{\omega}{2}"'] 
+      \arrow[drr, pos=0.3, "{-\frac{\omega}{2}S[1, 1, 0]}"'] & 
+        R \oplus B \arrow[d, pos = 0.3, dotted, "M^{-1}"] & 
+        R \arrow[d, "\frac{\omega}{2}"]\\
+    B & R \oplus B & R \\
+\end{tikzcd}
+
+\color{red}{This does not seem to work. If I delete the - and switch the 
+stencils it does... Split incorrect?}
+
+\section{Rank polymorphic}
+
+We have
+
+\[
+\nabla f: \mathbb{R^{n_1}} \times \cdots \times \mathbb{R^{n_d}} \to \mathbb{R} 
+= \sum_{i = 1}^{d} \frac{\partial^2}{\partial x_i} f,
+\]
+
+so discretizing gives
+
+\[
+\nabla f: \mathbb{R^{n_1}} \times \cdots \times \mathbb{R^{n_d}} \to \mathbb{R} 
+= \sum_{i = 1}^d A_{n_i} \otimes \bigotimes_{j \neq i} I_{n_j}
+\]
+
+In 2D
+
+\begin{align*}
+    A \otimes I + I \otimes A = (M - N) \otimes I + I \otimes (M - N) = \\
+    M \otimes I + I \otimes M - (N \otimes I + I \otimes N) \\
+\end{align*}
+
+this gives rise to the similar update
+
+\begin{align*}
+    u^{(k + 1)} = (M \otimes I + I \otimes M)^{-1} 
+            \left((N \otimes I + I \otimes N)u^{(k)} + f \right)
+\end{align*}
+
+\end{document}
