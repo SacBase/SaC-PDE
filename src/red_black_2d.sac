@@ -1,0 +1,156 @@
+/**
+ * This solves
+ *  u_xx + u_yy = f
+ * on Omega = [0, 1] x [0, 1]
+ * with periodic boundary conditions.
+ *
+ * The technique uses a Gauss-Seidel update with successive overrelaxation.
+ * We use red-black ordering so we can parallelise it.
+ **/
+
+use StdIO: all;
+use Math: all;
+use Array: all;
+use Benchmarking: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+double f(double x, double y)
+{
+  return -2d * sin(x + y);
+}
+
+double u(double x, double y)
+{
+  return sin(x + y);
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x));
+}
+
+double[n, n] to_red_black(double[n, n] x)
+{
+  y = reshape([n / 2, 2, n / 2, 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+double[n, n] from_red_black(double[n, n] x)
+{
+  y = reshape([2, n / 2, 2, n / 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+inline
+double[n, n] sor(double[n, n] u, double[n, n] f, double h, double omega)
+{
+  RB = tile([n / 2, n / 2], [n / 2, 0], u);
+  BR = tile([n / 2, n / 2], [0, n / 2], u);
+
+  update_BB = stencil(RB, [[0d, 1d, 0d],
+                           [0d, 1d, 0d],
+                           [0d, 0d, 0d]])
+              +
+              stencil(BR, [[0d, 0d, 0d],
+                           [1d, 1d, 0d],
+                           [0d, 0d, 0d]]);
+
+  update_RR = stencil(RB, [[0d, 0d, 0d],
+                           [0d, 1d, 1d],
+                           [0d, 0d, 0d]])
+              +
+              stencil(BR, [[0d, 0d, 0d],
+                           [0d, 1d, 0d],
+                           [0d, 1d, 0d]]);
+
+  BB = tile([n / 2, n / 2], [0, 0], u);
+  f_BB = tile([n / 2, n / 2], [0, 0], f);
+  BB = (1d - omega) * BB + omega / 4d * (update_BB - h * h * f_BB);
+
+  RR = tile([n / 2, n / 2], [n / 2, n / 2], u);
+  f_RR = tile([n / 2, n / 2], [n / 2, n / 2], f);
+  RR = (1d - omega) * RR + omega / 4d * (update_RR - h * h * f_RR);
+
+  update_BR = stencil(BB, [[0d, 0d, 0d],
+                           [0d, 1d, 1d],
+                           [0d, 0d, 0d]])
+              +
+              stencil(RR, [[0d, 1d, 0d],
+                           [0d, 1d, 0d],
+                           [0d, 0d, 0d]]);
+
+  update_RB = stencil(BB, [[0d, 0d, 0d],
+                           [0d, 1d, 0d],
+                           [0d, 1d, 0d]])
+              +
+              stencil(RR, [[0d, 0d, 0d],
+                           [1d, 1d, 0d],
+                           [0d, 0d, 0d]]);
+
+  f_BR = tile([n / 2, n / 2], [0, n / 2], f);
+  BR = (1d - omega) * BR + omega / 4d * (update_BR - h * h * f_BR);
+
+  f_RB = tile([n / 2, n / 2], [n / 2, 0], f);
+  RB = (1d - omega) * RB + omega / 4d * (update_RB - h * h * f_RB);
+
+  u = {iv -> BB[iv]
+          | [0    , 0    ] <= iv < [n / 2, n / 2];
+       iv -> BR[iv - [0, n / 2]]
+          | [0    , n / 2] <= iv < [n / 2, n    ];
+       iv -> RB[iv - [n / 2, 0]]
+          | [n / 2, 0    ] <= iv < [n    , n / 2];
+       iv -> RR[iv - [n / 2, n / 2]]
+          | [n / 2, n / 2] <= iv < [n    , n    ]};
+
+  return u;
+}
+
+int main()
+{
+  i_sor = getInterval("sor", 2);
+  start(i_sor);
+
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+  n = 2048;
+  h = (b - a) / tod(n);
+
+  F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
+              | [i, j] < [n, n]};
+  F_rb = to_red_black(F);
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  Utrue_rb = to_red_black(Utrue);
+  U_rb = {[i, j] -> 0d | [i, j] < [n, n]};
+
+  error = 1e308;
+  omega = 2d / (1d + sin(pi * h));
+  i     = 0;
+  while (error > 1e-6) {
+    U_rb = sor(U_rb, F_rb, h, omega);
+    if (i % 100 == 0) {
+      error = L2(U_rb - Utrue_rb) / L2(Utrue_rb);
+      printf("Iter %d: relative error is %e\n", i, error);
+    }
+    i++;
+  }
+
+  end(i_sor);
+  time, unit = returnResultUnit(i_sor);
+  gb_moved = tod(i) * 8d * 
+              (prod(tod(shape(F_rb))) +     // read
+              2d * prod(tod(shape(U_rb))))  // rfo and write
+              / 1e9;
+  printf("Bandwidth: %lf GB/s\n", gb_moved / time);
+
+  return 0;
+}

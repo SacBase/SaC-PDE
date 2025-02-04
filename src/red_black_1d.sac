@@ -40,117 +40,22 @@ double[n] to_red_black(double[n] x)
   return reshape([n], transpose(reshape([n / 2, 2], x)));
 }
 
-/**
- * (We ignore the 1 / h^2 factor for typographic clarity.)
- * We use red-black order, so in matrix form
- *
- *  A = -2I   B
- *      B^t  -2I
- * where I is the identity, B is a band of ones at the diagonal and subdiagonal. 
- *
- * or explicitly (easier to reason with when taking tensor products)
- *
- * A: e_i           -> -2e_i + 
- *                     e_(n / 2 + (i - 1) mod (n / 2)) + 
- *                     e_(n / 2 + (i    ) mod (n / 2))
- *    e_(i + n / 2) -> -2e_(i + n / 2) +
- *                     e_((i    ) mod (n / 2)) + 
- *                     e_((i + 1) mod (n / 2))
- *
- * This method is based on splitting A into M - N
- * We want to solve the system 
- * Au = (M - N)u = f <=>
- * Mu = Nu + f
- * which gives the update formula
- * Mu^(k + 1) = Nu^(k) + f.
- *
- * We choose in matrix form
- *
- * M = 1/omega * | 2I          0  |
- *               | omega B^t   2I |
- *
- * and
- *
- * N = 1/omega * | (1 - omega) * 2I  -omega B         |
- *               | 0                 (1 - omega) * 2I |
- *
- * or
- * 
- * M: e_i           -> 2 / omega * e_i
- * M: e_(i + n / 2) -> 2 / omega * e_(i + n / 2) + 
- *                      e_((i - 1) mod (n / 2)) + 
- *                      e_((i    ) mod (n / 2))
- *
- * Note that M^(-1) = 
- *
- *   omega / 2 * | I               0 |
- *               | -omega / 2 B^t  I |
- *
- *
- * Splitting R^n into R^(n / 2) \oplus R^(n / 2)  (black red)
- * we have
- * N [u_black, u_red]^t = [2(1 - omega) u_black - omega B u_red,
- *                         2(1 - omega) u_red] / omega
- * M^(-1) (N [u_black, u_red]^t + [f_black, f_red]^t) =
- * 0.5 * [2(1 - omega) u_black - omega B u_red + f_black,
- *        -omega B^t / 2 (expression above) + 2(1 - omega) (u_red + f_red)]
- *    
- *
- * So we can update the black part first, and then use that result to update the
- * red part.
- **/
 inline
 double[n] sor(double[n] u, double[n] f, double h, double omega)
 {
   /**
-   * Matches STREAM in parallel
+   * Matches STREAM in parallel, so all tiles, ++ etc. are optimised away.
    **/
-  /* Nu + f */
-  BB  = 2d / omega * (1d - omega) * tile([n / 2], [0], u);
-  RB  = stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
-  RR  = 2d / omega * (1d - omega) * tile([n / 2], [n / 2], u);
-  Nu  = (BB + RB) ++ RR;
-  Nuf = Nu + h * h * f;
+  B2B  = (1d - omega) * tile([n / 2], [0], u);
+  R2B  = omega / 2d * stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
+  R2R  = (1d - omega) * tile([n / 2], [n / 2], u);
+  Nuf = ((B2B + R2B) ++ R2R) + omega / 2d * h * h * f; // why + and not -?
 
-  /* M^{-1}(Nu + f) */
-  BR = omega / 2d * stencil(tile([n / 2], [0], Nuf), [0d, 1d, 1d]);
-  RR = omega / 2d * tile([n / 2], [n / 2], Nuf);
-  BB = omega / 2d * tile([n / 2], [0], Nuf);
-  u  = BB ++ (RR + omega / 2d * BR);
+  B2B  = tile([n / 2], [0], Nuf);
+  B2R  = omega / 2d * stencil(tile([n / 2], [0], Nuf), [0d, 1d, 1d]);
+  R2R  = tile([n / 2], [n / 2], Nuf);
 
-#if 0
-  /**
-   * Matches STREAM in parallel
-   **/
-  update_red = stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
-  u = with {
-        ([0] <= iv < [n / 2]): 
-                (1d - omega) * u[iv] +
-                omega / 2d * (update_red[iv] + h * h * f[iv]);
-      }: modarray(u);
-
-  update_black = stencil(tile([n / 2], [0], u), [0d, 1d, 1d]);
-  u = with {
-        ([n / 2] <= iv < [n]):
-              (1d - omega) * u[iv] + 
-                  omega / 2d * (update_black[iv - [n / 2]] + h * h * f[iv]);
-      }: modarray(u);
-#endif
-#if 0
-  /* Nu + f */
-  RB  = -omega / 2d * stencil(tile([n / 2], [n / 2], u), [1d, 1d, 0d]);
-  RR  = 2d / omega * (1d - omega) * tile([n / 2], [n / 2], u);
-  BB  = 2d / omega * (1d - omega) * tile([n / 2], [0], u);
-  Nu  = (BB + RB) ++ RR;
-  Nuf = Nu + h * h * f;
-
-  /* M^{-1} (Nu + f) */
-  BB = -omega / 2d * tile([n / 2], [0], Nuf);
-  BR = omega / 2d * stencil(tile([n / 2], [0], Nuf), [0d, 1d, 1d]);
-  RR = omega / 2d * tile([n / 2], [n / 2], Nuf);
-  u  = BB ++ (BR + RR);
-#endif
-
+  u   = B2B ++ (B2R + R2R);
   return u;
 }
 
@@ -190,8 +95,8 @@ int main()
   end(i_sor);
   time, unit = returnResultUnit(i_sor);
   gb_moved = tod(i) * 8d * 
-              (prod(tod(shape(F))) +  // read
-              2d * prod(tod(shape(U))))  // read and write
+              (prod(tod(shape(F))) +     // read
+              2d * prod(tod(shape(U))))  // rfo and write
               / 1e9;
   printf("Bandwidth: %lf GB/s\n", gb_moved / time);
 
