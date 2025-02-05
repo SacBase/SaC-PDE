@@ -1,0 +1,138 @@
+/**
+ * The Laplacian of a smooth function u: R x R -> R is defined as
+ *   u_xx + u_yy
+ * where u_xx means taking the partial derivative with respect to x twice,
+ * and similar for y.
+ * 
+ * Example:
+ * Let u(x, y) = sin(x + y);
+ * Then 
+ *     u_x    = cos(x + y), u_xx = -sin(x + y)
+ *     u_y    = cos(x + y), u_yy = -sin(x + y)
+ * Laplacian u = -2u
+ *
+ * We can approximate functions R x R -> R on a square grid [a, b] x [a, b]
+ * by computing points at (a + i * h, b + j * h) for h = (b - a) / n.
+ * We assume periodic boundary conditions, e.g. 
+ *     f([a, b] x {a})    = f([a, b] x {b})
+ *     f({a}    x [a, b]) = f({b}    x [a, b])
+ *
+ * Another possibility is Dirichlet boundary conditions, where the result
+ * on the boundary of Omega is known. In that case we divide by (n + 1) to
+ * get the interior of grid points.
+ *
+ * We can approximate the Laplacian by a linear function called the five-point
+ * stencil. The error between the Laplacian and five-point stencil is
+ * O(h^2). This is called the truncation error.
+ *
+ * Note on numeric stability:
+ *   The derivative of u in x is
+ *     lim_{h -> 0} (u(x - h) - u(x + h)) / (2h)
+ *   We do not know the true value of u(x - h) or u(x + h), but instead have
+ *   a computed value that is slightly wrong. That means we get catastrophic
+ *   cancellation for u(x - h) close to u(x + h), which is bound to happen
+ *   for small h. For this reason we should not take h too small.
+ **/
+
+use StdIO: all;
+use Math: all;
+use Array: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x) / prod(tod(shp)));
+}
+
+double[n, n] to_red_black(double[n, n] x)
+{
+  y = reshape([n / 2, 2, n / 2, 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+double[n, n] from_red_black(double[n, n] x)
+{
+  y = reshape([2, n / 2, 2, n / 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+inline
+double[n, n] five_point_rb(double[n, n] U, double h)
+{
+  BB = tile([n / 2, n / 2], [0, 0    ], U);
+  BR = tile([n / 2, n / 2], [0, n / 2], U);
+  RB = tile([n / 2, n / 2], [n / 2, 0    ], U);
+  RR = tile([n / 2, n / 2], [n / 2, n / 2], U);
+
+  res_BB = -4d * BB + stencil(BR, [[0d, 0d, 0d],
+                                   [1d, 1d, 0d],
+                                   [0d, 0d, 0d]]);
+  res_BR = -4d * BR + stencil(BB, [[0d, 0d, 0d],
+                                   [0d, 1d, 1d],
+                                   [0d, 0d, 0d]]);
+
+  res_RB = -4d * RB + stencil(RR, [[0d, 1d, 0d],
+                                   [0d, 1d, 0d],
+                                   [0d, 0d, 0d]]);
+  res_RR = -4d * RR + stencil(RB, [[0d, 0d, 0d],
+                                   [0d, 1d, 0d],
+                                   [0d, 1d, 0d]]);
+  /* See issue 2445 */
+#if 0
+  res = {iv -> res_BB[iv - [0    , 0    ]]
+            | [0    , 0    ] <= iv < [n / 2, n / 2];
+         iv -> res_BR[iv - [0    , n / 2]]
+            | [0    , n / 2] <= iv < [n / 2, n    ];
+         iv -> res_RB[iv - [n / 2, 0    ]]
+            | [n / 2, 0    ] <= iv < [n    , n / 2];
+         iv -> res_RR[iv - [n / 2, n / 2]]
+            | [n / 2, n / 2] <= iv < [n    , n    ]};
+#else
+  res = with {
+          ([0    , 0    ] <= iv < [n / 2, n / 2]): res_BB[iv - [0    , 0    ]];
+          ([n / 2, 0    ] <= iv < [n    , n / 2]): res_BB[iv - [n / 2, 0    ]];
+          ([0    , n / 2] <= iv < [n / 2, n    ]): res_BB[iv - [0    , n / 2]];
+          ([n / 2, n / 2] <= iv < [n    , n    ]): res_BB[iv - [n / 2, n / 2]];
+        }: genarray([n, n], 0d);
+#endif
+
+  return res;
+}
+
+double f(double x, double y)
+{
+  return sin(x + y);
+}
+
+double u(double x, double y)
+{
+  return -2d * f(x, y);
+}
+
+int main()
+{
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+
+  for (n = 8; n <= 16 * 1024; n *= 2) {
+      h = (b - a) / tod(n);
+      u = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
+                   | [i, j] < [n, n]};
+      u_rb = to_red_black(u);
+      laplace_u_rb = -2d * u_rb;
+      laplace_u_rb_approx = five_point_rb(u_rb, h);
+      printf("n = %8d, relative error: %e\n",
+             n, L2(laplace_u_rb_approx - laplace_u_rb) / L2(laplace_u_rb));
+  }
+
+  return 0;
+}

@@ -4,35 +4,30 @@
  * on Omega = [0, 1] x [0, 1]
  * with periodic boundary conditions.
  *
- * The technique uses a Gauss-Seidel update with successive overrelaxation.
- * We use red-black ordering so we can parallelise it.
+ * We use red-black successive underrelaxation as smoother.
  **/
 
 use StdIO: all;
 use Math: all;
 use Array: all;
-use Benchmarking: all;
+
+inline
+double f(double x, double y)
+{
+  return -2d * sin(x + y);
+}
+
+inline
+double u(double x, double y)
+{
+  return sin(x + y);
+}
 
 inline
 double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
 {
   return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
              | iv < shp};
-}
-
-double f(double x, double y)
-{
-  return -2d * sin(x + y);
-}
-
-double u(double x, double y)
-{
-  return sin(x + y);
-}
-
-double L2(double[d:shp] x)
-{
-  return sqrt(sum(x * x));
 }
 
 double[n, n] to_red_black(double[n, n] x)
@@ -62,33 +57,6 @@ double[n, n] red_black_assemble(double[n2, n2] BB, double[n2, n2] BR,
             ([n / 2, 0    ] <= iv < [n    , n / 2]): RB[iv - [n / 2, 0    ]];
             ([n / 2, n / 2] <= iv < [n    , n    ]): RR[iv - [n / 2, n / 2]];
          }: genarray([n, n], 0d);
-}
-
-inline
-double[n, n] five_point_rb(double[n, n] U, double h)
-{
-  BB = tile([n / 2, n / 2], [0, 0    ], U);
-  BR = tile([n / 2, n / 2], [0, n / 2], U);
-  RB = tile([n / 2, n / 2], [n / 2, 0    ], U);
-  RR = tile([n / 2, n / 2], [n / 2, n / 2], U);
-
-  res_BB = -4d * BB + stencil(BR, [[0d, 0d, 0d],
-                                   [1d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_BR = -4d * BR + stencil(BB, [[0d, 0d, 0d],
-                                   [0d, 1d, 1d],
-                                   [0d, 0d, 0d]]);
-
-  res_RB = -4d * RB + stencil(RR, [[0d, 1d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_RR = -4d * RR + stencil(RB, [[0d, 0d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 1d, 0d]]);
-
-  res = red_black_assemble(res_BB, res_BR, res_RB, res_RR);
-
-  return res;
 }
 
 inline
@@ -149,6 +117,75 @@ double[n, n] sor(double[n, n] u, double[n, n] f, double h, double omega)
 }
 
 inline
+double[n, n] five_point_rb(double[n, n] U, double h)
+{
+  BB = tile([n / 2, n / 2], [0, 0    ], U);
+  BR = tile([n / 2, n / 2], [0, n / 2], U);
+  RB = tile([n / 2, n / 2], [n / 2, 0    ], U);
+  RR = tile([n / 2, n / 2], [n / 2, n / 2], U);
+
+  res_BB = -4d * BB + stencil(BR, [[0d, 0d, 0d],
+                                   [1d, 1d, 0d],
+                                   [0d, 0d, 0d]]);
+  res_BR = -4d * BR + stencil(BB, [[0d, 0d, 0d],
+                                   [0d, 1d, 1d],
+                                   [0d, 0d, 0d]]);
+
+  res_RB = -4d * RB + stencil(RR, [[0d, 1d, 0d],
+                                   [0d, 1d, 0d],
+                                   [0d, 0d, 0d]]);
+  res_RR = -4d * RR + stencil(RB, [[0d, 0d, 0d],
+                                   [0d, 1d, 0d],
+                                   [0d, 1d, 0d]]);
+
+  res = red_black_assemble(res_BB, res_BR, res_RB, res_RR);
+
+  return res;
+}
+
+inline
+double[d:shp] manhattan_weights(double[d1] cs)
+| (d1 == d + 1)
+{
+  ones = genarray([d1 - 1], 1);
+  return {iv -> cs[sum(abs(iv - ones))] | iv < 3 * ones};
+}
+
+inline
+double[d:shpo] fine2coarse(double[d:shpi] r)
+{
+  return {iv -> r[2 * iv] | iv < shpi / 2};
+}
+
+inline
+double[d:shpo] coarse2fine(double[d:shpi] z)
+{
+  return {iv -> z[iv / 2] | iv < 2 * shpi step [2, 2]};
+}
+
+/* Interpolation */
+inline
+double[n2, m2] prolongate(double[n, m] x)
+{
+  return stencil(coarse2fine(x), manhattan_weights([1d, 1d / 2d, 1d / 4d])); 
+}
+
+/* Full-weighting operator: for P the interpolation matrix and d the
+ * dimension, restrict is P^t / 2^d. */ 
+inline
+double[n2, m2] restrict(double[n, m] x)
+{
+  return fine2coarse(stencil(x, 
+                             manhattan_weights([1d, 1d / 2d, 1d / 4d]) / 4d));
+}
+
+inline
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x)) / tod(prod(shp));
+}
+
+inline
 double[n, n] sor_solve(double[n, n] F, double h, int max_iter)
 {
   U     = {[i, j] -> 0d | [i, j] < [n, n]};
@@ -162,16 +199,18 @@ double[n, n] sor_solve(double[n, n] F, double h, int max_iter)
     if (i % 10 == 0) {
       new_error = L2(five_point_rb(U, h) - F) / L2(F);
       /**
-       * Mathematically, this is never true. But if F is relatively flat, so
-       * F(x - h) \approx F(x + h), stability issues in computing the difference. 
+       * Mathematically, the following condition is false.
+       * However, if F(x - h) \approx F(x + h), 
+       * then the relative error in computing F(x - h), F(x + h) is amplified
+       * in the subtraction F(x + h) - F(x - h), which can cause these stability
+       * issues.
        **/
       if (new_error > error) {
         i = max_iter;
       }
       error = new_error;
-      printf("Iter %d: relative error = %e, absolute = %e\n", i, error,
-             L2(five_point_rb(U, h) - F));
-   
+//      printf("Iter %d: relative error = %e, absolute = %e\n", i, error,
+//             L2(five_point_rb(U, h) - F));
     }
     i++;
   }
@@ -179,39 +218,60 @@ double[n, n] sor_solve(double[n, n] F, double h, int max_iter)
   return U;
 }
 
+inline
+double[n, n] v_cycle(double[n, n] F, double h)
+{
+  if (n <= 128) {
+    U = sor_solve(F, h, 1000);
+  } else {
+    U = {[i, j] -> 0d | [i, j] < [n, n]};
+    for (i = 0; i < 3; i++) {
+      U = sor(U, F, h, 2d / 3d);
+    }
+  
+    r_rb = F - five_point_rb(U, h);
+    r = from_red_black(r_rb);
+
+    r2h = restrict(r);
+    r2h_rb = to_red_black(r2h);
+
+    error2h_rb = v_cycle(-r2h_rb, 2d * h);
+    error2h = from_red_black(error2h_rb);
+
+    error = prolongate(error2h);
+    U = U - to_red_black(error);
+  
+    for (i = 0; i < 3; i++) {
+      U = sor(U, F, h, 2d / 3d);
+    }
+  }
+
+  return U;
+}
+
 int main()
 {
-  i_sor = getInterval("sor", 2);
-  start(i_sor);
-
   pi = 4d * atan(1d);
   a = 0d;
   b = 2d * pi;
-  n = 128;
+  n = 1024;
   h = (b - a) / tod(n);
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
-  F_rb = to_red_black(F);
   Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
                   | [i, j] < [n, n]};
   Utrue_rb = to_red_black(Utrue);
+  F_rb = to_red_black(F);
 
-  error = 1e308;
-  omega = 2d / (1d + sin(pi * h));
-  i     = 0;
-  U_rb = sor_solve(F_rb, h, 1000);
-
-  residual = F_rb - five_point_rb(U_rb, h);
-  correction = sor_solve(residual, h, 1000);
-
-  end(i_sor);
-  time, unit = returnResultUnit(i_sor);
-  gb_moved = tod(i) * 8d * 
-              (prod(tod(shape(F_rb))) +     // read
-              2d * prod(tod(shape(U_rb))))  // rfo and write
-              / 1e9;
-  printf("Bandwidth: %lf GB/s\n", gb_moved / time);
+  t = 0;
+  U = v_cycle(F, h);
+  for (t = 0; t < 5; t++) {
+    r = F_rb - five_point_rb(U, h);
+    U = U + v_cycle(r, h);
+    printf("L2(r) = %e\n", L2(r));
+    printf("Error: %e\n", L2(U - Utrue_rb) / L2(Utrue_rb));
+  }
 
   return 0;
 }

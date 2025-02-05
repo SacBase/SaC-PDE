@@ -6,18 +6,15 @@
 
 \usepackage{color}
 
+\DeclareMathOperator{\id}{id}
+
+\title{Rank Polymorphic MultiGrid}
+
 \begin{document}
 
 \textcolor{red}{Work in progress, not in readable state yet.}
 
-\section{Background}
-
-In the category of vector spaces, $\oplus$ is both the product and coproduct.
-It distributes over tensor products. We write $a \prod b$ for the map induced
-by the product (e.g. $\iota_1(a(x)) + \iota_2(b(x))$) and $a \coprod b$ for the 
-one induced by the coproduct (e.g. $a(\pi_1(x)) + b(\pi_2(x))$).
-
-\section{1D}
+\section{One-Dimensional Discretization}
 
 We write $\{e_0, \cdots, e_{n - 1}\}$ for the standard basis of $\mathbb{R}^n$.
 The one-dimensional discretization of $\nabla$ (periodic boundary conditions)
@@ -27,98 +24,102 @@ is $A / h^2$ for
 A: e_{i} \mapsto e_{(i - 1) \mod n} - 2 e_{i} + e_{(i + 1) \mod n}.
 \]
 
-We want to solve $(A / h^2)u = f$ or equivalently $Au = h^2 f$.
-
-Let $\sigma: \mathbb{R}^n \to \mathbb{R}^n$ be the red-black reordering, so
+We want to solve $(A / h^2)u = f$ or equivalently $Au = h^2 f$. For parallel
+algorithms it is useful to solve a transformed system instead. To this end
+we look at the vector space $\mathbb{R}^{n / 2} \oplus \mathbb{R}^{n / 2}$
+instead, where we call the first summand the black part, with basis
+$b_0, \cdots, b_{n / 2 - 1}$, and the second summand the red part, with
+basis $r_0, \cdots, r_{n / 2 - 1}$. Let
+$\sigma: \mathbb{R}^{n / 2} \oplus \mathbb{R}^{n / 2} \to \mathbb{R}$ be
+the isomorphism that sends $b_i$ to $e_{2i}$ and $r_i$ to $e_{2i + 1}$.
+Then the red-black form of $A$ is $A^{rb} := \sigma^{-1} A \sigma$.
+We can equivalently solve the system $A^{rb}u^{rb} = \sigma^{-1} f$ and recover
+$u$ as follows.
 
 \begin{align*}
-    \sigma: & e_{2i} \mapsto e_{i} \\
-            & e_{2i + 1} \mapsto e_{i + n / 2}
+    A^{rb}u^{rb} = \sigma^{-1} f \\
+    \sigma^{-1} A \sigma u^{rb} = \sigma^{-1} f \\
+    A (\sigma u^{rb}) = f
 \end{align*}
-
-Then the red-black form of $A$ is
-
-\begin{align*}
-    A^{rb} := \sigma A \sigma^{-1} & & \\
-    e_{i} \mapsto & -2e_{i} + e_{n / 2 + (i - 1) \mod n / 2} & i < n / 2 \\
-          & + e_{n / 2 + i \mod n / 2} &  \\ 
-    e_{i + n / 2} \mapsto & -2e_{i + n / 2} + e_{i \mod n / 2} & i \geq n / 2 \\
-          & + e_{(i + 1) \mod n / 2} &  \\ 
-\end{align*}
-
-We can work more naturally by looking through the lense 
-$\mathbb{R}^{n / 2} \oplus \mathbb{R}^{n / 2} \cong \mathbb{R}^{n}$.
-We write $\{e^b_0, \cdots e^b_{n / 2 - 1}\}$ for the basis of the first copy
-(black), and $\{e^r_0, \cdots e^r_{n / 2 - 1}\}$ (red). The inclusions are
-$e^b_i \mapsto e_i, \quad e^r_i \mapsto e_{i + n / 2}$.
 
 \newpage
 
-In this notation
+From now on, we are not going to write $\mod$. The function $A^{rb}$ is
+given more explicitly by
 
 \begin{align*}
-    A^{rb} & \\
-    e^b_{i} \mapsto & -2e^b_{i} + e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2} \\
-    e^r_{i} \mapsto & -2e^r_{i} + e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2} \\ 
+    A^{rb}: & \\
+    b_{i} \mapsto & -2b_{i} + r_{i - 1} + r_{i} \\
+    r_{i} \mapsto & -2r_{i} + b_{i} + b_{i + 1} \\ 
 \end{align*}
 
 We split $A^{rb} = M - N$, so we can write $A^{rb}u = h^2f \iff Mu = Nu + h^2f$,
 so we can use update formula $u^{(k + 1)} = M^{-1}(Nu^{(k)} + h^2f)$.
 
-
 We parameterize by $\omega$.
 
 \begin{align*}
     M : & \\
-    e^b_{i} \mapsto & -\frac{2}{\omega}\cdot e^b_{i} \\
-    e^r_{i} \mapsto & -\frac{2}{\omega}\big(e^r_{i} - \frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
+    b_{i} \mapsto & -\frac{2}{\omega}\big(b_{i} - \frac{\omega}{2} (r_{i - 1} + r_{i}) \big) \\
+    r_{i} \mapsto & -\frac{2}{\omega}\cdot r_{i} \\
 \end{align*}
 
 \begin{align*}
     N : & \\
-    e^b_{i} \mapsto & -\frac{2}{\omega}\big((1 - \omega)e^b_{i} - \frac{\omega}{2} (e^r_{(i - 1) \mod n / 2} + e^r_{i \mod n / 2}) \big) \\
-    e^r_{i} \mapsto & -\frac{2}{\omega}(1 - \omega)e^r_{i} \\
+    b_{i} \mapsto & -\frac{2}{\omega}(1 - \omega)b_{i} \\
+    r_{i} \mapsto & -\frac{2}{\omega}\big((1 - \omega)r_{i} + \frac{\omega}{2} (b_{i} + b_{i + 1}) \big) \\
 \end{align*}
 
 \begin{align*}
     M^{-1} : & \\
-    e^b_{i} \mapsto & -\frac{\omega}{2} e^b_{i} \\
-    e^r_{i} \mapsto & -\frac{\omega}{2}\big(e^r_{i} - (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
+    b_{i} \mapsto & -\frac{\omega}{2}\big(b_{i} + \frac{\omega}{2} (r_{i - 1} + r_{i}) \big) \\
+    r_{i} \mapsto & -\frac{\omega}{2} r_{i} \\
 \end{align*}
 
-
-To check this is an inverse: trivial on the black part.
+To check this is an inverse: trivial on the red part.
 
 \begin{align*}
-    e^r_i \xrightarrow{M} -\frac{2}{\omega}\big(e^r_{i} - \frac{\omega}{2} (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) = \\
-    -\frac{2}{\omega}e^r_i + e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2} \xrightarrow{M^{-1}}  \\
-    -\frac{2}{\omega} \cdot -\frac{\omega}{2}\big(e^r_{i} - (e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}) \big) \\
-    - \frac{\omega}{2}\left(e^b_{i \mod n / 2} + e^b_{(i + 1) \mod n / 2}\right) = e^r_i
+b_i \mapsto -\frac{2}{\omega}b_{i} + r_{i - 1} + r_{i} \\
+    \mapsto  b_{i} +\frac{\omega}{2} (r_{i - 1} + r_{i}) - \frac{\omega}{2} r_{i - 1} - \frac{\omega}{2} r_i
 \end{align*}
+
+To get rid of the fractions, we rewrite $M^{-1}(Nu + h^2 f)$ to 
+
+\[
+    (-2 / \omega M^{-1})\left((-\omega / 2 N)(u) - \omega / 2 h^2 f\right).
+\]
+
+\textcolor{red}{It appears to need to be + omega / 2 h\^2 f}
 
 We write $S[a, b, c]$ for the stencil function 
 
 \[
-    e_i \mapsto ae_{(i - 1) \mod n} + be_{i \mod n} + c e_{(i + 1) \mod n}
+    x[i] = a * x[i - 1] + b * x[i] + c * x[i + 1]
 \]
 
-and $a$ for $x \mapsto ax$. With this notation, we can represent $A$ as 
-commutative diagram
+and $a$ for $x \mapsto ax$. Note that linear map $e_i \mapsto e_{i - 1} + e_i$
+corresponds with $S[0, 1, 1]$ and not $S[1, 1, 0]$!
+
+With this notation, we can draw 
+$-2 / \omega M$ and $-\omega / 2 N$ in a commutative diagram.
 
 \begin{tikzcd}[column sep = huge, row sep = huge]
-    B \arrow[d, "-\frac{2}{\omega}(1 - \omega)"'] \arrow[r, "\iota_1"]
-      \arrow[drr, pos = 0.3, "{S[1, 1, 0]}"'] & 
-    R \oplus B \arrow[d, dotted, pos = 0.4, "N"']& 
-    R \arrow[d, "-\frac{2}{\omega}(1 - \omega)"] \arrow[l, "\iota_2"'] \\
-    B \arrow[d, "-\frac{\omega}{2}"'] &
-    R \oplus B \arrow[d, pos = 0.3, dotted, "M^{-1}"] & 
-    R \arrow[d, "\frac{\omega}{2}"] 
-      \arrow[dll, pos=0.3, "{\frac{\omega}{2} S[0, 1, 1]}"] \\
+    B \arrow[d, "(1 - \omega)"']  & 
+    R \oplus B \arrow[d, dotted, pos = 0.4, "-\omega / 2 N"']& 
+    R \arrow[d, "(1 - \omega)"] 
+      \arrow[dll, "{\frac{\omega}{2} S([1, 1, 0])}"]\\
+    B \arrow[d, "\id"'] 
+      \arrow[drr, pos=0.3, "{\frac{\omega}{2} S[0, 1, 1]}"'] & 
+    R \oplus B \arrow[d, pos = 0.3, dotted, "-2 / \omega M^{-1}"] & 
+    R \arrow[d, "\id"] \\
     B & R \oplus B & R \\
 \end{tikzcd}
 
-\textcolor{red}{This does not seem to work. If I delete the - and switch the 
-stencils it does... Split incorrect?}
+the -1 is reversed, if $e_{i} \mapsto e_{i - 1} + e_i$, then
+$e_{j} = e_{j} + e_{j + 1}$. 
+
+We can move the R $(1 - \omega)$ to the second function, and then both 
+$R \otimes I$ and $I \otimes R$ are the identity good.
 
 \section{Rank polymorphic}
 
@@ -148,6 +149,39 @@ this gives rise to the similar update
 \begin{align*}
     u^{(k + 1)} = (M \otimes I + I \otimes M)^{-1} 
             \left((N \otimes I + I \otimes N)u^{(k)} + f \right)
+\end{align*}
+
+\begin{align*}
+    N \otimes I: & \\
+    b_i \otimes b_j = & -\frac{2}{\omega}(1 - \omega)b_i \otimes b_j            \\
+                      & -\frac{2}{\omega}\frac{\omega}{2} r_{i - 1} \otimes b_j \\
+                      & -\frac{2}{\omega}\frac{\omega}{2} r_i       \otimes b_j \\
+\end{align*}
+
+\begin{align*}
+    I \otimes N: & \\
+    b_i \otimes b_j = & -\frac{2}{\omega}(1 - \omega)b_i \otimes b_j            \\
+                      & -\frac{2}{\omega}\frac{\omega}{2} b_j \otimes r_{i - 1} \\
+                      & -\frac{2}{\omega}\frac{\omega}{2} b_j \otimes r         \\
+\end{align*}
+
+So
+
+\begin{align*}
+    -\frac{2}{\omega} (I \otimes N + N \otimes I): & \\
+    b_i \otimes b_j = & 2(1 - \omega)b_i \otimes b_j           \\
+                      & \frac{\omega}{2} r_{i - 1} \otimes b_j \\
+                      & \frac{\omega}{2} r_i       \otimes b_j \\
+                      & \frac{\omega}{2} b_j \otimes r_{i - 1} \\
+                      & \frac{\omega}{2} b_j \otimes r         \\
+\end{align*}
+
+\begin{align*}
+    N \otimes I + I \otimes N: & \\
+    r_i \otimes r_j = & -\frac{4}{\omega}(1 - \omega)r_i \otimes r_j \\
+    r_i \otimes b_j = & -\frac{2}{\omega}(1 - \omega)r_i \otimes b_j \\
+                      & +\frac{2}{\omega}\frac{\omega}{2} r_i \otimes r_j \\
+                      & +\frac{2}{\omega}\frac{\omega}{2} r_i \otimes r_{j - 1} \\
 \end{align*}
 
 \end{document}
