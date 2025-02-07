@@ -232,10 +232,9 @@ sor_solve(double[n, n2] F_red, double[n, n2] F_black,
 }
 
 inline
-double[n, n2] , double[n, n2] v_cycle(double[n, n] F, double h)
+double[n, n2] , double[n, n2] 
+v_cycle(double[n, n2] F_red, double[n, n2] F_black, double h)
 {
-  F_red, F_black = to_red_black(F);
-
   if (n <= 128) {
     U_red, U_black = sor_solve(F_red, F_black, h, h * h, 10000);
   } else {
@@ -249,8 +248,7 @@ double[n, n2] , double[n, n2] v_cycle(double[n, n] F, double h)
     r_red = Au_red - F_red;
     r_black = Au_black - F_black;
     r2h_red, r2h_black = restrict_rb(r_red, r_black);
-    r2h = from_red_black(r2h_red, r2h_black);
-    error2h_red, error2h_black = v_cycle(r2h, 2d * h);
+    error2h_red, error2h_black = v_cycle(r2h_red, r2h_black, 2d * h);
     error_red, error_black = prolongate_rb(error2h_red, error2h_black);
     U_red = U_red - error_red;
     U_black = U_black - error_black;
@@ -284,14 +282,13 @@ int main()
 
   i_v = getInterval("v", 2);
   start(i_v);
-  U_red, U_black = v_cycle(F, h);
-//  U = from_red_black(U_red, U_black);
+  U_red, U_black = v_cycle(F_red, F_black, h);
   do {
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    Au = from_red_black(Au_red, Au_black);
-    r = F - Au;
-    corr_red, corr_black = v_cycle(r, h);
-//    corr = from_red_black(corr_red, corr_black);
+    r_red = F_red - Au_red;
+    r_black = F_black - Au_black;
+    r = from_red_black(r_red, r_black);
+    corr_red, corr_black = v_cycle(r_red, r_black, h);
     U_red   = U_red + corr_red;
     U_black = U_black + corr_black;
     printf("L2(r) = %e\n", L2(r));
