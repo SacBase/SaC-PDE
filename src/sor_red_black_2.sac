@@ -7,6 +7,12 @@
  * The technique uses a Gauss-Seidel update with successive overrelaxation.
  * We use red-black ordering so we can parallelise it. This is not exactly the 
  * same as the sequential Gauss-Seidel, but the convergence is similar.
+ * 
+ * We solve (h^2A)u = h^2 f
+ * so A becomes the nice stencil
+ * [[0d,  1d, 0d],
+ *  [1d, -4d, 1d],
+ *  [0d,  1d, 0d]]
  **/
 
 use StdIO: all;
@@ -96,7 +102,7 @@ double L2(double[d:shp] x)
 inline
 double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                                double[n, m] f_red, double[n, m] f_black,
-                               double h, double omega)
+                               double omega)
   | (n == 2 * m && m % 2 == 0)
 {
   update_red = {[i, j] -> u_red[mod([i - 1, m - 1 - j], [n, m])] +
@@ -104,12 +110,6 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                           u_red[mod([i    , j  - 1   ], [n, m])] +
                           u_red[mod([i + 1, m - 1 - j], [n, m])]
                        | [i, j] < [n, m]};
-
-//  update_red = {[i, j] -> u_red[mod(i - 1, n),     m - 1 - j ] +
-//                          u_red[    i        ,     j         ] +
-//                          u_red[    i        , mod(j  - 1, m)] +
-//                          u_red[mod(i + 1, n),     m - 1 - j ]
-//                       | [i, j] < [n, m]};
 
   u_black = (1d - omega) * u_black +
             omega / 4d * (update_red - f_black);
@@ -120,16 +120,37 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                             u_black[mod([i + 1, m - 1 - j], [n, m])]
                          | [i, j] < [n, m]};
 
-//  update_black = {[i, j] -> u_black[mod(i - 1, n), m - 1 - j] +
-//                            u_black[i            , j        ] +
-//                            u_black[i            , mod(j  + 1, m)] +
-//                            u_black[mod(i + 1, n), m - 1 - j]
-//                         | [i, j] < [n, m]};
-
   u_red = (1d - omega) * u_red +
           omega / 4d * (update_black - f_red);
 
   return (u_red, u_black);
+}
+
+inline
+double[n, m], double[n, m], int sor_solve(double[n, m] f_red, double[n, m] f_black,
+                                          double h, int max_iter)
+  | (n == 2 * m && m % 2 == 0)
+{
+  u_red   = {iv -> 0d | iv < [n, m]};
+  u_black = {iv -> 0d | iv < [n, m]};
+
+  pi    = 4d * atan(1d);
+  omega = 2d / (1d + sin(pi * h));
+
+  error = 1e308;
+  t = 0;
+  while (error > h * h && t < max_iter) {
+    u_red, u_black = sor(u_red, u_black, f_red, f_black, omega);
+    if (t % 100 == 0) {
+      rhs_red, rhs_black = stencil_rb(u_red, u_black, [-4d, 1d]);
+      error = L2_rb(rhs_red - f_red, rhs_black - f_black) / 
+                L2_rb(f_red, f_black);
+      printf("Iter %d, relative error is %e\n", t, error);
+    }
+    t++;
+  }
+
+  return (u_red, u_black, t);
 }
 
 int main()
@@ -146,38 +167,22 @@ int main()
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
   F = h * h * F;
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
+  F_red, F_black = to_red_black(F);
   U = {[i, j] -> 0d | [i, j] < [n, n]};
 
-  U_red, U_black = to_red_black(U);
-  F_red, F_black = to_red_black(F);
-  Utrue_red, Utrue_black = to_red_black(Utrue);
-
-  pi    = 4d * atan(1d);
-  omega = 2d / (1d + sin(pi * h));
-  i     = 0;
-  error = 1e308;
-  while (error > h * h)
-  {
-    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
-    if (i % 100 == 0) {
-      rhs_red, rhs_black = stencil_rb(U_red, U_black, [-4d, 1d]);
-      error = L2_rb(F_red - rhs_red, F_black - rhs_black) /
-              L2_rb(F_red, F_black);
-      printf("Iter %d: relative error is %e\n", i, error);
-    }
-    i++;
-  }
+  U_red, U_black, iters = sor_solve(F_red, F_black, h, 20000);
 
   end(i_sor);
   time, unit = returnResultUnit(i_sor);
-  gb_moved = tod(i) * 8d * 
+  gb_moved = tod(iters) * 8d * 
               (tod(_size_A_(F_red) + _size_A_(F_black)) +     // read
               2d * tod(_size_A_(U_red) + _size_A_(U_black)))  // rfo and write
               / 1e9;
   printf("Bandwidth: %lf GB/s\n", gb_moved / time);
 
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  Utrue_red, Utrue_black = to_red_black(Utrue);
   printf("Relative error compared to true answer is %e\n",
           L2_rb(U_red - Utrue_red, U_black - Utrue_black) / 
           L2_rb(Utrue_red, Utrue_black));
