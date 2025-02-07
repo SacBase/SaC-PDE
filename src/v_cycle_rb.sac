@@ -4,20 +4,21 @@
  * on Omega = [0, 1] x [0, 1]
  * with periodic boundary conditions.
  *
- * We use red-black successive underrelaxation as smoother.
+ * The technique uses a Gauss-Seidel update with successive overrelaxation.
+ * We use red-black ordering so we can parallelise it. This is not exactly the 
+ * same as the sequential Gauss-Seidel, but the convergence is similar.
  **/
 
 use StdIO: all;
 use Math: all;
 use Array: all;
+use Benchmarking: all;
 
-inline
 double f(double x, double y)
 {
   return -2d * sin(x + y);
 }
 
-inline
 double u(double x, double y)
 {
   return sin(x + y);
@@ -30,119 +31,17 @@ double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
              | iv < shp};
 }
 
-double[n, n] to_red_black(double[n, n] x)
+double[n, n] five_point(double[n, n] U, double h)
 {
-  y = reshape([n / 2, 2, n / 2, 2], x);
-  z = {[i, j, k, l] -> y[j, i, l, k]};
-  return reshape([n, n], z);
+  return stencil(U, [[0d,  1d, 0d],
+                     [1d, -4d, 1d],
+                     [0d,  1d, 0d]]) / (h * h);
 }
 
-double[n, n] from_red_black(double[n, n] x)
-{
-  y = reshape([2, n / 2, 2, n / 2], x);
-  z = {[i, j, k, l] -> y[j, i, l, k]};
-  return reshape([n, n], z);
-}
-
-inline 
-double[n, n] red_black_assemble(double[n2, n2] BB, double[n2, n2] BR,
-                                double[n2, n2] RB, double[n2, n2] RR)
-    | (n2 == n / 2)
-{
-  n = n2 * 2;
-
-  return with {
-            ([0    , 0    ] <= iv < [n / 2, n / 2]): BB[iv - [0    , 0    ]];
-            ([0    , n / 2] <= iv < [n / 2, n    ]): BR[iv - [0    , n / 2]];
-            ([n / 2, 0    ] <= iv < [n    , n / 2]): RB[iv - [n / 2, 0    ]];
-            ([n / 2, n / 2] <= iv < [n    , n    ]): RR[iv - [n / 2, n / 2]];
-         }: genarray([n, n], 0d);
-}
-
-inline
-double[n, n] sor(double[n, n] u, double[n, n] f, double h, double omega)
-{
-  RB = tile([n / 2, n / 2], [n / 2, 0], u);
-  BR = tile([n / 2, n / 2], [0, n / 2], u);
-
-  update_BB = stencil(RB, [[0d, 1d, 0d],
-                           [0d, 1d, 0d],
-                           [0d, 0d, 0d]])
-              +
-              stencil(BR, [[0d, 0d, 0d],
-                           [1d, 1d, 0d],
-                           [0d, 0d, 0d]]);
-
-  update_RR = stencil(RB, [[0d, 0d, 0d],
-                           [0d, 1d, 1d],
-                           [0d, 0d, 0d]])
-              +
-              stencil(BR, [[0d, 0d, 0d],
-                           [0d, 1d, 0d],
-                           [0d, 1d, 0d]]);
-
-  BB = tile([n / 2, n / 2], [0, 0], u);
-  f_BB = tile([n / 2, n / 2], [0, 0], f);
-  BB = (1d - omega) * BB + omega / 4d * (update_BB - h * h * f_BB);
-
-  RR = tile([n / 2, n / 2], [n / 2, n / 2], u);
-  f_RR = tile([n / 2, n / 2], [n / 2, n / 2], f);
-  RR = (1d - omega) * RR + omega / 4d * (update_RR - h * h * f_RR);
-
-  update_BR = stencil(BB, [[0d, 0d, 0d],
-                           [0d, 1d, 1d],
-                           [0d, 0d, 0d]])
-              +
-              stencil(RR, [[0d, 1d, 0d],
-                           [0d, 1d, 0d],
-                           [0d, 0d, 0d]]);
-
-  update_RB = stencil(BB, [[0d, 0d, 0d],
-                           [0d, 1d, 0d],
-                           [0d, 1d, 0d]])
-              +
-              stencil(RR, [[0d, 0d, 0d],
-                           [1d, 1d, 0d],
-                           [0d, 0d, 0d]]);
-
-  f_BR = tile([n / 2, n / 2], [0, n / 2], f);
-  BR = (1d - omega) * BR + omega / 4d * (update_BR - h * h * f_BR);
-
-  f_RB = tile([n / 2, n / 2], [n / 2, 0], f);
-  RB = (1d - omega) * RB + omega / 4d * (update_RB - h * h * f_RB);
-
-  u = red_black_assemble(BB, BR, RB, RR);
-
-  return u;
-}
-
-inline
-double[n, n] five_point_rb(double[n, n] U, double h)
-{
-  BB = tile([n / 2, n / 2], [0, 0    ], U);
-  BR = tile([n / 2, n / 2], [0, n / 2], U);
-  RB = tile([n / 2, n / 2], [n / 2, 0    ], U);
-  RR = tile([n / 2, n / 2], [n / 2, n / 2], U);
-
-  res_BB = -4d * BB + stencil(BR, [[0d, 0d, 0d],
-                                   [1d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_BR = -4d * BR + stencil(BB, [[0d, 0d, 0d],
-                                   [0d, 1d, 1d],
-                                   [0d, 0d, 0d]]);
-
-  res_RB = -4d * RB + stencil(RR, [[0d, 1d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_RR = -4d * RR + stencil(RB, [[0d, 0d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 1d, 0d]]);
-
-  res = red_black_assemble(res_BB, res_BR, res_RB, res_RR);
-
-  return res;
-}
-
+/**
+ * Generates a d-dimensional grid, where elements with Manhattan-distance 
+ * i to the center have weights cs[i].
+ **/
 inline
 double[d:shp] manhattan_weights(double[d1] cs)
 | (d1 == d + 1)
@@ -185,36 +84,116 @@ double L2(double[d:shp] x)
   return sqrt(sum(x * x)) / tod(prod(shp));
 }
 
+double[n, n2], double[n, n2] to_red_black(double[n, n] x)
+  | (n2 == n / 2)
+{
+  black = {[i, j] -> x[i, 2 * j] 
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * j - 1] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+
+  red   = {[i, j] -> x[i, 2 * j + 1]
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * (j + 1)] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+
+  return (red, black);
+}
+
+double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
+  | (n2 == n / 2)
+{
+  return with {
+            ([0, 0] <= [i, j] < [n, n] step [2, 2]): black[i, j / 2];
+            ([0, 1] <= [i, j] < [n, n] step [2, 2]): red  [i, j / 2];
+            ([1, 0] <= [i, j] < [n, n] step [2, 2]): red  [i, (n - j - 1) / 2];
+            ([1, 1] <= [i, j] < [n, n] step [2, 2]): black[i, (n - j) / 2];
+         }: genarray([n, n], 0d);
+}
+
+/**
+ * Weights are Manhattan distance to the central point, so equivalent to
+ * weights [w[1], w[0], w[1]] in the more general case.
+ **/
 inline
-double[n, n] sor_solve(double[n, n] F, double h, int max_iter)
+double[n, n2], double[n, n2] 
+stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[2] w)
+{
+  res_black = w[0] * x_black +
+              w[1] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i    , j         ], [n, n2])] +
+                                x_red[mod([i    , j  - 1    ], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+
+  res_red   = w[0] * x_red +
+              w[1] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i    , j         ], [n, n2])] +
+                                x_black[mod([i    , j  + 1    ], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+ 
+  return (res_red, res_black);
+}
+
+double L2_rb(double[d:shp] x, double[d:shp] y)
+{
+  return sqrt(sum(x * x) + sum(y * y));
+}
+
+inline
+double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
+                               double[n, m] f_red, double[n, m] f_black,
+                               double h, double omega)
+  | (n == 2 * m && m % 2 == 0)
+{
+  update_red = {[i, j] -> u_red[mod([i - 1, m - 1 - j], [n, m])] +
+                          u_red[mod([i    , j        ], [n, m])] +
+                          u_red[mod([i    , j  - 1   ], [n, m])] +
+                          u_red[mod([i + 1, m - 1 - j], [n, m])]
+                       | [i, j] < [n, m]};
+
+  u_black = (1d - omega) * u_black +
+            omega / 4d * (update_red - h * h * f_black);
+
+  update_black = {[i, j] -> u_black[mod([i - 1, m - 1 - j], [n, m])] +
+                            u_black[mod([i    , j        ], [n, m])] +
+                            u_black[mod([i    , j  + 1   ], [n, m])] +
+                            u_black[mod([i + 1, m - 1 - j], [n, m])]
+                         | [i, j] < [n, m]};
+
+  u_red = (1d - omega) * u_red +
+          omega / 4d * (update_black - h * h * f_red);
+
+  return (u_red, u_black);
+}
+
+inline
+double[n, n] sor(double[n, n] u, double[n, n] f, double h, double omega)
+{
+  u_red, u_black = to_red_black(u); 
+  f_red, f_black = to_red_black(f); 
+  f_check = from_red_black(f_red, f_black); 
+
+  u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
+
+  u = from_red_black(u_red, u_black);
+  return u;
+}
+
+inline
+double[n, n] sor_solve(double[n, n] F, double h, double eps, int max_iter)
 {
   U     = {[i, j] -> 0d | [i, j] < [n, n]};
   pi    = 4d * atan(1d);
   omega = 2d / (1d + sin(pi * h));
   error = 1e308;
   i = 0;
-
-  while (error > h * h && i < max_iter) {
+  while (error > eps && i < max_iter) {
     U = sor(U, F, h, omega);
-    if (i % 10 == 0) {
-      new_error = L2(five_point_rb(U, h) - F) / L2(F);
-      /**
-       * Mathematically, the following condition is false.
-       * However, if F(x - h) \approx F(x + h), 
-       * then the relative error in computing F(x - h), F(x + h) is amplified
-       * in the subtraction F(x + h) - F(x - h), which can cause these stability
-       * issues.
-       **/
-      if (new_error > error) {
-        i = max_iter;
-      }
-      error = new_error;
-//      printf("Iter %d: relative error = %e, absolute = %e\n", i, error,
-//             L2(five_point_rb(U, h) - F));
-    }
+    error = L2(five_point(U, h) - F) / L2(F);
     i++;
   }
-
   return U;
 }
 
@@ -222,28 +201,28 @@ inline
 double[n, n] v_cycle(double[n, n] F, double h)
 {
   if (n <= 128) {
-    U = sor_solve(F, h, 1000);
+    U = sor_solve(F, h, h * h, 10000);
   } else {
     U = {[i, j] -> 0d | [i, j] < [n, n]};
+    U_red, U_black = to_red_black(U);
+    F_red, F_black = to_red_black(F);
     for (i = 0; i < 3; i++) {
-      U = sor(U, F, h, 2d / 3d);
+      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
+    U = from_red_black(U_red, U_black);
+    F = from_red_black(F_red, F_black);
   
-    r_rb = F - five_point_rb(U, h);
-    r = from_red_black(r_rb);
-
+    r = F - five_point(U, h);
     r2h = restrict(r);
-    r2h_rb = to_red_black(r2h);
-
-    error2h_rb = v_cycle(-r2h_rb, 2d * h);
-    error2h = from_red_black(error2h_rb);
-
+    error2h = v_cycle(-r2h, 2d * h);
     error = prolongate(error2h);
-    U = U - to_red_black(error);
+    U = U - error;
   
+    U_red, U_black = to_red_black(U);
     for (i = 0; i < 3; i++) {
-      U = sor(U, F, h, 2d / 3d);
+      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
+    U = from_red_black(U_red, U_black);
   }
 
   return U;
@@ -251,27 +230,41 @@ double[n, n] v_cycle(double[n, n] F, double h)
 
 int main()
 {
+  i_init = getInterval("init", 2);
+
+  start(i_init);
   pi = 4d * atan(1d);
   a = 0d;
   b = 2d * pi;
-  n = 1024;
+  n = 16384;
   h = (b - a) / tod(n);
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
-  Utrue_rb = to_red_black(Utrue);
-  F_rb = to_red_black(F);
 
-  t = 0;
+  end(i_init);
+  time, unit = returnResultUnit(i_init);
+  printf("Initialisation took %lf %s\n", time, unit);
+
+  i_v = getInterval("v", 2);
+  start(i_v);
   U = v_cycle(F, h);
-  for (t = 0; t < 5; t++) {
-    r = F_rb - five_point_rb(U, h);
+  do {
+    r = F - five_point(U, h);
     U = U + v_cycle(r, h);
     printf("L2(r) = %e\n", L2(r));
-    printf("Error: %e\n", L2(U - Utrue_rb) / L2(Utrue_rb));
-  }
+  } while (L2(r) > h * h);
+  end(i_v);
+
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  printf("Actual relative error %e\n", L2(U - Utrue) / L2(Utrue));
+
+  time, unit = returnResultUnit(i_v);
+  printf("Solving %lf GB took %lf %s.\n", 
+         3d * 8d * tod(n) * tod(n) / 1e9, // U, F, r
+         time,
+         unit);
 
   return 0;
 }
