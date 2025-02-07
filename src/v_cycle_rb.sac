@@ -246,8 +246,9 @@ int main()
     corr_red, corr_black = v_cycle(r_red, r_black, h);
     U_red   = U_red + corr_red;
     U_black = U_black + corr_black;
-    printf("Relative residual norm = %e\n", L2_rb(r_red, r_black) / tod(n * n));
-  } while (L2_rb(r_red, r_black) / tod(n * n) > h * h);
+    printf("Relative residual norm = %e\n", 
+              L2_rb(r_red, r_black) / L2_rb(F_red, F_black));
+  } while (L2_rb(r_red, r_black) / L2_rb(F_red, F_black) > h * h);
   end(i_v);
 
   time, unit = returnResultUnit(i_v);
