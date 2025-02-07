@@ -23,44 +23,6 @@ double u(double x, double y)
   return sin(x + y);
 }
 
-inline
-double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
-{
-  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
-             | iv < shp};
-}
-
-double[n, n] five_point(double[n, n] U, double h)
-{
-  return stencil(U, [[0d,  1d, 0d],
-                     [1d, -4d, 1d],
-                     [0d,  1d, 0d]]) / (h * h);
-}
-
-/**
- * Generates a d-dimensional grid, where elements with Manhattan-distance 
- * i to the center have weights cs[i].
- **/
-inline
-double[d:shp] manhattan_weights(double[d1] cs)
-| (d1 == d + 1)
-{
-  ones = genarray([d1 - 1], 1);
-  return {iv -> cs[sum(abs(iv - ones))] | iv < 3 * ones};
-}
-
-inline
-double[d:shpo] fine2coarse(double[d:shpi] r)
-{
-  return {iv -> r[2 * iv] | iv < shpi / 2};
-}
-
-inline
-double[d:shpo] coarse2fine(double[d:shpi] z)
-{
-  return {iv -> z[iv / 2] | iv < 2 * shpi step [2, 2]};
-}
-
 /* Interpolation */
 inline
 double[m, m2], double[m, m2] 
