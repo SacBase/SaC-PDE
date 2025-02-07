@@ -4,9 +4,8 @@
  * on Omega = [0, 1] x [0, 1]
  * with periodic boundary conditions.
  *
- * The technique uses a Gauss-Seidel update with successive overrelaxation.
- * We use red-black ordering so we can parallelise it. This is not exactly the 
- * same as the sequential Gauss-Seidel, but the convergence is similar.
+ * The technique uses a Gauss-Seidel update with successive overrelaxation,
+ * red-black ordering.
  **/
 
 use StdIO: all;
@@ -72,10 +71,11 @@ double[n2, m2] prolongate(double[n, m] x)
 /* Full-weighting operator: for P the interpolation matrix and d the
  * dimension, restrict is P^t / 2^d. */ 
 inline
-double[n2, m2] restrict(double[n, m] x)
+double[n2, m2]
+restrict_rb(double[n, m] x_red, double[n, m] x_black)
 {
-  return fine2coarse(stencil(x, 
-                             manhattan_weights([1d, 1d / 2d, 1d / 4d]) / 4d));
+  res_red, res_black = stencil_rb(x_red, x_black, [1d, 1d / 2d, 1d / 4d] / 4d);
+  return {[i, j] -> res_black[2 * i, j] | [i, j] < [n / 2, n / 2]};
 }
 
 inline
@@ -132,6 +132,37 @@ stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[2] w)
                                 x_black[mod([i    , j  + 1    ], [n, n2])] +
                                 x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
                               | [i, j] < [n, n2]};
+ 
+  return (res_red, res_black);
+}
+
+inline
+double[n, n2], double[n, n2] 
+stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[3] w)
+{
+  res_black = w[0] * x_black +
+              w[1] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i    , j         ], [n, n2])] +
+                                x_red[mod([i    , j  - 1    ], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]} +
+              w[2] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i - 1, n2     - j], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i + 1, n2     - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+
+  res_red   = w[0] * x_red +
+              w[1] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i    , j         ], [n, n2])] +
+                                x_black[mod([i    , j  + 1    ], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]} +
+              w[2] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i - 1, n2 - 2 - j], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 2 - j], [n, n2])]
+                             | [i, j] < [n, n2]};
  
   return (res_red, res_black);
 }
@@ -204,16 +235,19 @@ double[n, n] v_cycle(double[n, n] F, double h)
     }
 
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    Au = from_red_black(Au_red, Au_black);
-  
-    r = F - Au;
-    r2h = restrict(r);
+    r_red = F_red - Au_red;
+    r_black = F_black - Au_black;
+    r2h = restrict_rb(r_red, r_black);
     error2h = v_cycle(-r2h, 2d * h);
     error = prolongate(error2h);
     U = from_red_black(U_red, U_black);
     U = U - error;
-  
     U_red, U_black = to_red_black(U);
+//    error2h_red, error2h_black = to_red_black(error2h);
+//    error_red, error_black = prolongate_rb(error2h_red, error2h_black);
+//    U_red = U_red - error_red;
+//    U_black = U_black - error_black;
+
     for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
