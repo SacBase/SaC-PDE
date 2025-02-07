@@ -63,8 +63,10 @@ double[d:shpo] coarse2fine(double[d:shpi] z)
 
 /* Interpolation */
 inline
-double[m, m2], double[m, m2] prolongate_rb(double[n, n] x)
+double[m, m2], double[m, m2] 
+prolongate_rb(double[n, n2] x_red, double[n, n2] x_black)
 {
+  x = from_red_black(x_red, x_black);
   black = with {
                 ([0, 0] <= [i, j] < [2 * n, n] step[2, 1]): x[i / 2, j];
                 ([1, 0] <= [i, j] < [2 * n, n] step[2, 1]): 0d;
@@ -73,17 +75,18 @@ double[m, m2], double[m, m2] prolongate_rb(double[n, n] x)
 
   res_red, res_black = stencil_rb(red, black, [1d, 1d / 2d, 1d / 4d]);
   return (res_red, res_black);
-//  return stencil(coarse2fine(x), manhattan_weights([1d, 1d / 2d, 1d / 4d])); 
 }
 
 /* Full-weighting operator: for P the interpolation matrix and d the
  * dimension, restrict is P^t / 2^d. */ 
 inline
-double[n2, m2]
+double[n2, m2], double[n2, m2]
 restrict_rb(double[n, m] x_red, double[n, m] x_black)
 {
   res_red, res_black = stencil_rb(x_red, x_black, [1d, 1d / 2d, 1d / 4d] / 4d);
-  return {[i, j] -> res_black[2 * i, j] | [i, j] < [n / 2, n / 2]};
+  y_red, y_black = to_red_black({[i, j] -> res_black[2 * i, j] 
+                                        | [i, j] < [n / 2, n / 2]});
+  return (y_red, y_black);
 }
 
 inline
@@ -188,7 +191,7 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 {
   update_red = {[i, j] -> u_red[mod([i - 1, m - 1 - j], [n, m])] +
                           u_red[mod([i    , j        ], [n, m])] +
-                          u_red[mod([i    , j  - 1   ], [n, m])] +
+                          u_red[mod([i    , j - 1    ], [n, m])] +
                           u_red[mod([i + 1, m - 1 - j], [n, m])]
                        | [i, j] < [n, m]};
 
@@ -197,7 +200,7 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 
   update_black = {[i, j] -> u_black[mod([i - 1, m - 1 - j], [n, m])] +
                             u_black[mod([i    , j        ], [n, m])] +
-                            u_black[mod([i    , j  + 1   ], [n, m])] +
+                            u_black[mod([i    , j + 1    ], [n, m])] +
                             u_black[mod([i + 1, m - 1 - j], [n, m])]
                          | [i, j] < [n, m]};
 
@@ -229,7 +232,7 @@ sor_solve(double[n, n2] F_red, double[n, n2] F_black,
 }
 
 inline
-double[n, n] v_cycle(double[n, n] F, double h)
+double[n, n2] , double[n, n2] v_cycle(double[n, n] F, double h)
 {
   F_red, F_black = to_red_black(F);
 
@@ -238,25 +241,26 @@ double[n, n] v_cycle(double[n, n] F, double h)
   } else {
     U_red = {iv -> 0d | iv < [n, n / 2]};
     U_black = {iv -> 0d | iv < [n, n / 2]};
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 2; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
 
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    r_red = F_red - Au_red;
-    r_black = F_black - Au_black;
-    r2h = restrict_rb(r_red, r_black);
-    error2h = v_cycle(-r2h, 2d * h);
-    error_red, error_black = prolongate_rb(error2h);
+    r_red = Au_red - F_red;
+    r_black = Au_black - F_black;
+    r2h_red, r2h_black = restrict_rb(r_red, r_black);
+    r2h = from_red_black(r2h_red, r2h_black);
+    error2h_red, error2h_black = v_cycle(r2h, 2d * h);
+    error_red, error_black = prolongate_rb(error2h_red, error2h_black);
     U_red = U_red - error_red;
     U_black = U_black - error_black;
 
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 2; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
   }
 
-  return from_red_black(U_red, U_black);
+  return (U_red, U_black);
 }
 
 int main()
@@ -272,6 +276,7 @@ int main()
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
+  F_red, F_black = to_red_black(F);
 
   end(i_init);
   time, unit = returnResultUnit(i_init);
@@ -279,23 +284,30 @@ int main()
 
   i_v = getInterval("v", 2);
   start(i_v);
-  U = v_cycle(F, h);
+  U_red, U_black = v_cycle(F, h);
+//  U = from_red_black(U_red, U_black);
   do {
-    r = F - five_point(U, h);
-    U = U + v_cycle(r, h);
+    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+    Au = from_red_black(Au_red, Au_black);
+    r = F - Au;
+    corr_red, corr_black = v_cycle(r, h);
+//    corr = from_red_black(corr_red, corr_black);
+    U_red   = U_red + corr_red;
+    U_black = U_black + corr_black;
     printf("L2(r) = %e\n", L2(r));
   } while (L2(r) > h * h);
   end(i_v);
-
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
-  printf("Actual relative error %e\n", L2(U - Utrue) / L2(Utrue));
 
   time, unit = returnResultUnit(i_v);
   printf("Solving %lf GB took %lf %s.\n", 
          3d * 8d * tod(n) * tod(n) / 1e9, // U, F, r
          time,
          unit);
+
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  U = from_red_black(U_red, U_black);
+  printf("Actual relative error %e\n", L2(U - Utrue) / L2(Utrue));
 
   return 0;
 }
