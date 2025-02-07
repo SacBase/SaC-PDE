@@ -1,0 +1,92 @@
+use StdIO: all;
+use Array: all;
+
+double[n, n2], double[n, n2] to_red_black(double[n, n] x)
+  | (n2 == n / 2)
+{
+  black = {[i, j] -> x[i, 2 * j] 
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * j - 1] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+
+  red   = {[i, j] -> x[i, 2 * j + 1]
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * (j + 1)] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+
+  return (red, black);
+}
+
+double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
+  | (n2 == n / 2)
+{
+  return with {
+            ([0, 0] <= [i, j] < [n, n] step [2, 2]): black[i, j / 2];
+            ([0, 1] <= [i, j] < [n, n] step [2, 2]): red  [i, j / 2];
+            ([1, 0] <= [i, j] < [n, n] step [2, 2]): red  [i, (n - j - 1) / 2];
+            ([1, 1] <= [i, j] < [n, n] step [2, 2]): black[i, (n - j) / 2];
+         }: genarray([n, n], 0d);
+}
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+/**
+ * Weights are Manhattan distance to the central point, so equivalent to
+ * weights [w[1], w[0], w[1]] in the more general case.
+ **/
+inline
+double[n, n2], double[n, n2] 
+stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[2] w)
+{
+  res_black = w[0] * x_black +
+              w[1] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i    , j         ], [n, n2])] +
+                                x_red[mod([i    , j  - 1    ], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+
+  res_red   = w[0] * x_red +
+              w[1] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i    , j         ], [n, n2])] +
+                                x_black[mod([i    , j  + 1    ], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+ 
+  return (res_red, res_black);
+}
+
+int main()
+{
+  n = 8;
+
+  x = {[i, j] -> tod(10 * i + j) | [i, j] < [n, n]};
+
+  x_red, x_black = to_red_black(x);
+  y = from_red_black(x_red, x_black);
+
+  if (all(x == y)) {
+    printf("Isomorphism correct\n");
+  } else {
+    printf("Isomorphism false\n");
+  }
+
+  down = stencil(x, [[0d,  1d, 0d],
+                     [1d, -2d, 1d],
+                     [0d,  1d, 0d]]);
+
+  x_red, x_black = stencil_rb(x_red, x_black, [-2d, 1d]);
+  rightdownleft = from_red_black(x_red, x_black);
+
+  if (all(down == rightdownleft)) {
+    printf("Diagram commutes\n");
+  } else {
+    printf("Diagram does not commute\n");
+  }
+
+  return 0;
+}
