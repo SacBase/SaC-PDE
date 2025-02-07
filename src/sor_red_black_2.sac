@@ -102,7 +102,7 @@ double L2(double[d:shp] x)
 inline
 double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                                double[n, m] f_red, double[n, m] f_black,
-                               double omega)
+                               double h, double omega)
   | (n == 2 * m && m % 2 == 0)
 {
   update_red = {[i, j] -> u_red[mod([i - 1, m - 1 - j], [n, m])] +
@@ -112,7 +112,7 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                        | [i, j] < [n, m]};
 
   u_black = (1d - omega) * u_black +
-            omega / 4d * (update_red - f_black);
+            omega / 4d * (update_red - h * h * f_black);
 
   update_black = {[i, j] -> u_black[mod([i - 1, m - 1 - j], [n, m])] +
                             u_black[mod([i    , j        ], [n, m])] +
@@ -121,7 +121,7 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                          | [i, j] < [n, m]};
 
   u_red = (1d - omega) * u_red +
-          omega / 4d * (update_black - f_red);
+          omega / 4d * (update_black - h * h * f_red);
 
   return (u_red, u_black);
 }
@@ -140,9 +140,9 @@ double[n, m], double[n, m], int sor_solve(double[n, m] f_red, double[n, m] f_bla
   error = 1e308;
   t = 0;
   while (error > h * h && t < max_iter) {
-    u_red, u_black = sor(u_red, u_black, f_red, f_black, omega);
+    u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
     if (t % 100 == 0) {
-      rhs_red, rhs_black = stencil_rb(u_red, u_black, [-4d, 1d]);
+      rhs_red, rhs_black = stencil_rb(u_red, u_black, [-4d, 1d] / (h * h));
       error = L2_rb(rhs_red - f_red, rhs_black - f_black) / 
                 L2_rb(f_red, f_black);
       printf("Iter %d, relative error is %e\n", t, error);
@@ -166,7 +166,6 @@ int main()
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
-  F = h * h * F;
   F_red, F_black = to_red_black(F);
   U = {[i, j] -> 0d | [i, j] < [n, n]};
 
