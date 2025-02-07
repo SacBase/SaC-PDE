@@ -169,63 +169,57 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 }
 
 inline
-double[n, n] sor(double[n, n] u, double[n, n] f, double h, double omega)
+double[n, n2], double[n, n2] 
+sor_solve(double[n, n2] F_red, double[n, n2] F_black, 
+          double h, double eps, int max_iter)
 {
-  u_red, u_black = to_red_black(u); 
-  f_red, f_black = to_red_black(f); 
-  f_check = from_red_black(f_red, f_black); 
-
-  u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
-
-  u = from_red_black(u_red, u_black);
-  return u;
-}
-
-inline
-double[n, n] sor_solve(double[n, n] F, double h, double eps, int max_iter)
-{
-  U     = {[i, j] -> 0d | [i, j] < [n, n]};
-  pi    = 4d * atan(1d);
-  omega = 2d / (1d + sin(pi * h));
-  error = 1e308;
-  i = 0;
-  while (error > eps && i < max_iter) {
-    U = sor(U, F, h, omega);
-    error = L2(five_point(U, h) - F) / L2(F);
-    i++;
+  U_red   = {iv -> 0d | iv < [n, n2]};
+  U_black = {iv -> 0d | iv < [n, n2]};
+  pi      = 4d * atan(1d);
+  omega   = 2d / (1d + sin(pi * h));
+  error   = 1e308;
+  t       = 0;
+  while (error > eps && t < max_iter) {
+    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
+    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+    error = L2_rb(F_red - Au_red, F_black - Au_black) /
+              L2_rb(F_red, F_black);
+    t++;
   }
-  return U;
+  return (U_red, U_black);
 }
 
 inline
 double[n, n] v_cycle(double[n, n] F, double h)
 {
+  F_red, F_black = to_red_black(F);
+
   if (n <= 128) {
-    U = sor_solve(F, h, h * h, 10000);
+    U_red, U_black = sor_solve(F_red, F_black, h, h * h, 10000);
   } else {
-    U = {[i, j] -> 0d | [i, j] < [n, n]};
-    U_red, U_black = to_red_black(U);
-    F_red, F_black = to_red_black(F);
+    U_red = {iv -> 0d | iv < [n, n / 2]};
+    U_black = {iv -> 0d | iv < [n, n / 2]};
     for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
-    U = from_red_black(U_red, U_black);
-    F = from_red_black(F_red, F_black);
+
+    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+    Au = from_red_black(Au_red, Au_black);
   
-    r = F - five_point(U, h);
+    r = F - Au;
     r2h = restrict(r);
     error2h = v_cycle(-r2h, 2d * h);
     error = prolongate(error2h);
+    U = from_red_black(U_red, U_black);
     U = U - error;
   
     U_red, U_black = to_red_black(U);
     for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
-    U = from_red_black(U_red, U_black);
   }
 
-  return U;
+  return from_red_black(U_red, U_black);
 }
 
 int main()

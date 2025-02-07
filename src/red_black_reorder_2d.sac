@@ -60,11 +60,50 @@ stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[2] w)
   return (res_red, res_black);
 }
 
+inline
+double[n, n2], double[n, n2] 
+stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[3] w)
+{
+  res_black = w[0] * x_black +
+              w[1] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i    , j         ], [n, n2])] +
+                                x_red[mod([i    , j  - 1    ], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]} +
+              w[2] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i - 1, n2     - j], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i + 1, n2     - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+
+  res_red   = w[0] * x_red +
+              w[1] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i    , j         ], [n, n2])] +
+                                x_black[mod([i    , j  + 1    ], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]} +
+              w[2] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i - 1, n2 - 2 - j], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 2 - j], [n, n2])]
+                             | [i, j] < [n, n2]};
+ 
+  return (res_red, res_black);
+}
+
+inline
+double[d:shp] manhattan_weights(double[d1] cs)
+| (d1 == d + 1)
+{
+  ones = genarray([d1 - 1], 1);
+  return {iv -> cs[sum(abs(iv - ones))] | iv < 3 * ones};
+}
+
 int main()
 {
   n = 8;
 
-  x = {[i, j] -> tod(10 * i + j) | [i, j] < [n, n]};
+  x = reshape([n, n], tod(iota(n * n)));
 
   x_red, x_black = to_red_black(x);
   y = from_red_black(x_red, x_black);
@@ -76,12 +115,23 @@ int main()
   }
 
   down = stencil(x, [[0d,  1d, 0d],
-                     [1d, -2d, 1d],
+                     [1d, -4d, 1d],
                      [0d,  1d, 0d]]);
 
-  x_red, x_black = stencil_rb(x_red, x_black, [-2d, 1d]);
-  rightdownleft = from_red_black(x_red, x_black);
+  y_red, y_black = stencil_rb(x_red, x_black, [-4d, 1d]);
+  rightdownleft = from_red_black(y_red, y_black);
 
+  if (all(down == rightdownleft)) {
+    printf("Diagram commutes\n");
+  } else {
+    printf("Diagram does not commute\n");
+  }
+
+  printf("9-point\n");
+
+  down = stencil(x, manhattan_weights([1d, 2d, 3d]));
+  y_red, y_black = stencil_rb(x_red, x_black, [1d, 2d, 3d]);
+  rightdownleft = from_red_black(y_red, y_black);
   if (all(down == rightdownleft)) {
     printf("Diagram commutes\n");
   } else {
