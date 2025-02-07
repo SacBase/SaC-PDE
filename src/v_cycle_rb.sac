@@ -89,12 +89,6 @@ restrict_rb(double[n, m] x_red, double[n, m] x_black)
   return (y_red, y_black);
 }
 
-inline
-double L2(double[d:shp] x)
-{
-  return sqrt(sum(x * x)) / tod(prod(shp));
-}
-
 double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   | (n2 == n / 2)
 {
@@ -287,12 +281,11 @@ int main()
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
     r_red = F_red - Au_red;
     r_black = F_black - Au_black;
-    r = from_red_black(r_red, r_black);
     corr_red, corr_black = v_cycle(r_red, r_black, h);
     U_red   = U_red + corr_red;
     U_black = U_black + corr_black;
-    printf("L2(r) = %e\n", L2(r));
-  } while (L2(r) > h * h);
+    printf("Relative residual norm = %e\n", L2_rb(r_red, r_black) / tod(n * n));
+  } while (L2_rb(r_red, r_black) / tod(n * n) > h * h);
   end(i_v);
 
   time, unit = returnResultUnit(i_v);
@@ -303,8 +296,10 @@ int main()
 
   Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
                   | [i, j] < [n, n]};
-  U = from_red_black(U_red, U_black);
-  printf("Actual relative error %e\n", L2(U - Utrue) / L2(Utrue));
+  Utrue_red, Utrue_black = to_red_black(Utrue);
+  printf("Actual relative error %e\n", 
+            L2_rb(U_red - Utrue_red, U_black - Utrue_black) / 
+              L2_rb(Utrue_red, Utrue_black));
 
   return 0;
 }
