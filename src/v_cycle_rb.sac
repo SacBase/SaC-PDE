@@ -63,9 +63,17 @@ double[d:shpo] coarse2fine(double[d:shpi] z)
 
 /* Interpolation */
 inline
-double[n2, m2] prolongate(double[n, m] x)
+double[m, m2], double[m, m2] prolongate_rb(double[n, n] x)
 {
-  return stencil(coarse2fine(x), manhattan_weights([1d, 1d / 2d, 1d / 4d])); 
+  black = with {
+                ([0, 0] <= [i, j] < [2 * n, n] step[2, 1]): x[i / 2, j];
+                ([1, 0] <= [i, j] < [2 * n, n] step[2, 1]): 0d;
+               }: genarray([2 * n, n], 0d);
+  red = with {}: genarray([2 * n, n], 0d);
+
+  res_red, res_black = stencil_rb(red, black, [1d, 1d / 2d, 1d / 4d]);
+  return (res_red, res_black);
+//  return stencil(coarse2fine(x), manhattan_weights([1d, 1d / 2d, 1d / 4d])); 
 }
 
 /* Full-weighting operator: for P the interpolation matrix and d the
@@ -239,14 +247,9 @@ double[n, n] v_cycle(double[n, n] F, double h)
     r_black = F_black - Au_black;
     r2h = restrict_rb(r_red, r_black);
     error2h = v_cycle(-r2h, 2d * h);
-    error = prolongate(error2h);
-    U = from_red_black(U_red, U_black);
-    U = U - error;
-    U_red, U_black = to_red_black(U);
-//    error2h_red, error2h_black = to_red_black(error2h);
-//    error_red, error_black = prolongate_rb(error2h_red, error2h_black);
-//    U_red = U_red - error_red;
-//    U_black = U_black - error_black;
+    error_red, error_black = prolongate_rb(error2h);
+    U_red = U_red - error_red;
+    U_black = U_black - error_black;
 
     for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
