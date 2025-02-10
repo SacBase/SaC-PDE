@@ -10,7 +10,7 @@
 
 use StdIO: all;
 use Math: all;
-use Array: all;
+use Structures: all;
 use Benchmarking: all;
 
 double f(double x, double y)
@@ -81,27 +81,33 @@ restrict_rb(double[n, m] x_red, double[n, m] x_black)
                                         | [i, j] < [n / 2, n / 2]});
   return (y_red, y_black);
 #else
-  res_black = (1d * x_black +
-              0.5 * {[i, j] -> x_red[mod([i - 1, m - 1 - j], [n, m])] +
-                               x_red[mod([i    , j        ], [n, m])] +
-                               x_red[mod([i    , j - 1    ], [n, m])] +
-                               x_red[mod([i + 1, m - 1 - j], [n, m])]
-                            | [i, j] < [n, m]} +
-              0.25 * {[i, j] -> x_black[mod([i - 1, m - 1 - j], [n, m])] +
-                                x_black[mod([i - 1, m     - j], [n, m])] +
-                                x_black[mod([i + 1, m - 1 - j], [n, m])] +
-                                x_black[mod([i + 1, m     - j], [n, m])]
-                             | [i, j] < [n, m]}) / 4d;
+  y = with {
+        ([0, 0] <= [i, j] < [n / 2, n / 2]):
+          (1d  *   x_black[2 * i, j] +
+           0.5  * (x_red[mod([2 * i - 1, m - 1 - j], [n, m])] +
+                   x_red[mod([2 * i    , j        ], [n, m])] +
+                   x_red[mod([2 * i    , j - 1    ], [n, m])] +
+                   x_red[mod([2 * i + 1, m - 1 - j], [n, m])]) +
+           0.25 * (x_black[mod([2 * i - 1, m - 1 - j], [n, m])] +
+                   x_black[mod([2 * i - 1, m     - j], [n, m])] +
+                   x_black[mod([2 * i + 1, m - 1 - j], [n, m])] +
+                   x_black[mod([2 * i + 1, m     - j], [n, m])])) / 4d;
+      }: genarray([n / 2, n / 2], 0d);
 
-  y = {[i, j] -> res_black[2 * i, j] 
-              | [i, j] < [n / 2, n / 2]};
+  y_black = {[i, j] -> y[i, 2 * j] 
+                    | [0, 0] <= [i, j] < [n / 2, n / 4] step [2, 1];
+             [i, j] -> y[i, n / 2 - 2 * j - 1]
+                    | [1, 0] <= [i, j] < [n / 2, n / 4] step [2, 1]};
 
-  y_red, y_black = to_red_black(y);
-  
+  y_red   = {[i, j] -> y[i, 2 * j + 1]
+                    | [0, 0] <= [i, j] < [n / 2, n / 4] step [2, 1];
+             [i, j] -> y[i, n / 2 - 2 * (j + 1)] 
+                    | [1, 0] <= [i, j] < [n / 2, n / 4] step [2, 1]};
   return (y_red, y_black);
 #endif
 }
 
+inline
 double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   | (n2 == n / 2)
 {
@@ -118,6 +124,7 @@ double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   return (red, black);
 }
 
+noinline
 double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
   | (n2 == n / 2)
 {
@@ -245,7 +252,12 @@ double[m, n], double[m, n] zero_rb(int m, int n)
   return (zero, zero);
 }
 
-inline
+/* Cost is cut by a factor 4 every recursive call, meaning we do not need
+ * to specialize too deeply. Doing this and noinline helps cut compilation
+ * time and binary size. */
+specialize double[16384, 8192], double[16384, 8192] v_cycle(double[16384, 8192] U_red, double[16384, 8192] U_black, double[16384, 8192] F_red, double[16384, 8192] F_black, double h);
+specialize double[8192, 4096], double[8192, 4096] v_cycle(double[8192, 4096] U_red, double[8192, 4096] U_black, double[8192, 4096] F_red, double[8192, 4096] F_black, double h);
+noinline
 double[n, n2] , double[n, n2] 
 v_cycle(double[n, n2] U_red, double[n, n2] U_black,
         double[n, n2] F_red, double[n, n2] F_black, double h)
@@ -253,7 +265,7 @@ v_cycle(double[n, n2] U_red, double[n, n2] U_black,
   if (n <= 128) {
     U_red, U_black = sor_solve(F_red, F_black, h, h * h, 10000);
   } else {
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
 
@@ -268,7 +280,7 @@ v_cycle(double[n, n2] U_red, double[n, n2] U_black,
     U_red = U_red - error_red;
     U_black = U_black - error_black;
 
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < 3; i++) {
       U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
     }
   }
@@ -276,11 +288,99 @@ v_cycle(double[n, n2] U_red, double[n, n2] U_black,
   return (U_red, U_black);
 }
 
-inline
+#ifdef PRINT_CONVERGENCE
+void print_error(double[n, n2] U_red, double[n, n2] U_black, 
+                 double[n, n2] F_red, double[n, n2] F_black,
+                 double h, string error_message)
+{
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+
+  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+  error = L2_rb(F_red - Au_red, F_black - Au_black) /
+            L2_rb(F_red, F_black);
+
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  Utrue_red, Utrue_black = to_red_black(Utrue);
+  backward_error = L2_rb(Utrue_red - U_red, Utrue_black - U_black) /
+                      L2_rb(Utrue_red, Utrue_black);
+
+  printf("n = %d, forward error %s is %e, backward %e\n", 
+          n, 
+          error_message, 
+          error,
+          backward_error);
+}
+#endif
+
+noinline
 double[n, n2] , double[n, n2] 
 fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
 {
-    return (F_red, F_black);
+    pi = 4d * atan(1d);
+    a = 0d;
+    b = 2d * pi;
+
+    small_n = 128;
+    factor  = n / small_n;
+    small_h = h * tod(factor);
+
+    small_F_black = {[i, j] -> F_black[i * factor, j * factor] 
+                            | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                     [i, j] -> F_black[i * factor, (n - factor) / 2 - j * factor]
+                            | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+    small_F_red   = {[i, j] -> F_black[i * factor, (2 * j + 1) * factor / 2]
+                             | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                      [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
+                             | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+
+    U_red, U_black = sor_solve(small_F_red, small_F_black, small_h, 
+                               small_h * small_h, 10000);
+#ifdef PRINT_CONVERGENCE
+    print_error(U_red, U_black, small_F_red, small_F_black, small_h, 
+                "SOR solve");
+#endif
+
+    do {
+      small_n *= 2;
+      small_h /= 2d;
+      factor  /= 2;
+  
+      small_F_black = {[i, j] -> F_black[i * factor, j * factor] 
+                              | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                       [i, j] -> F_black[i * factor, (n - factor) / 2 - j * factor]
+                              | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+      small_F_red   = {[i, j] -> F_black[i * factor, (2 * j + 1) * factor / 2]
+                               | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                        [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
+                               | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+
+      U_red, U_black = prolongate_rb(U_red, U_black);
+#ifdef PRINT_CONVERGENCE
+      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "prolongate");
+#endif
+      U_red, U_black = v_cycle(U_red, U_black, 
+                               small_F_red, small_F_black, 
+                               small_h);
+#ifdef PRINT_CONVERGENCE
+      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "v-cycle");
+      printf("\n");
+#endif
+    } while (small_n < n / 2);
+
+    U_red, U_black = prolongate_rb(U_red, U_black);
+#ifdef PRINT_CONVERGENCE
+    print_error(U_red, U_black, F_red, F_black, h, "prolongate");
+#endif
+    U_red, U_black = v_cycle(U_red, U_black, F_red, F_black, h);
+#ifdef PRINT_CONVERGENCE
+    print_error(U_red, U_black, F_red, F_black, h, "v-cycle");
+    printf("\n");
+#endif
+
+    return (U_red, U_black);
 }
 
 int main()
@@ -304,24 +404,27 @@ int main()
 
   i_v = getInterval("v", 2);
   start(i_v);
-  U_red, U_black = zero_rb(n, n / 2);
-  U_red, U_black = v_cycle(U_red, U_black, F_red, F_black, h);
+  U_red, U_black = fmg(F_red, F_black, h);
+  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+  r_red = F_red - Au_red;
+  r_black = F_black - Au_black;
+  rel_err = L2_rb(r_red, r_black) / L2_rb(F_red, F_black);
+  printf("Relative residual norm = %e\n", rel_err);
   do {
+    corr_red, corr_black = fmg(r_red, r_black, h);
+    U_red   = U_red + corr_red;
+    U_black = U_black + corr_black;
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
     r_red = F_red - Au_red;
     r_black = F_black - Au_black;
-    corr_red, corr_black = zero_rb(n, n / 2);
-    corr_red, corr_black = v_cycle(corr_red, corr_black, r_red, r_black, h);
-    U_red   = U_red + corr_red;
-    U_black = U_black + corr_black;
-    printf("Relative residual norm = %e\n", 
-              L2_rb(r_red, r_black) / L2_rb(F_red, F_black));
-  } while (L2_rb(r_red, r_black) / L2_rb(F_red, F_black) > h * h);
+    rel_err = L2_rb(r_red, r_black) / L2_rb(F_red, F_black);
+    printf("Relative residual norm = %e\n", rel_err);
+  } while (rel_err > h * h);
   end(i_v);
 
   time, unit = returnResultUnit(i_v);
   printf("Solving %lf GB took %lf %s.\n", 
-         3d * 8d * tod(n) * tod(n) / 1e9, // U, F, r
+         1.333 * 4d * 8d * tod(n) * tod(n) / 1e9, // geometric series, U, F, r, corr
          time,
          unit);
 
