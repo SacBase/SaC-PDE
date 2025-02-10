@@ -10,7 +10,7 @@
 
 use StdIO: all;
 use Math: all;
-use Array: all;
+use Structures: all;
 use Benchmarking: all;
 
 double f(double x, double y)
@@ -107,6 +107,7 @@ restrict_rb(double[n, m] x_red, double[n, m] x_black)
 #endif
 }
 
+inline
 double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   | (n2 == n / 2)
 {
@@ -123,6 +124,7 @@ double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   return (red, black);
 }
 
+noinline
 double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
   | (n2 == n / 2)
 {
@@ -223,103 +225,155 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 }
 
 inline
-double[n, m], double[n, m] sor_solve(double[n, m] f_red, double[n, m] f_black,
-                                     double h, int max_iter)
-  | (n == 2 * m && m % 2 == 0)
+double[n, n2], double[n, n2] 
+sor_solve(double[n, n2] F_red, double[n, n2] F_black, 
+          double h, double eps, int max_iter)
 {
-  u_red   = {iv -> 0d | iv < [n, m]};
-  u_black = {iv -> 0d | iv < [n, m]};
-
-  pi    = 4d * atan(1d);
-  omega = 2d / (1d + sin(pi * h));
-
-  for (t = 0; t < max_iter; t++) {
-    u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
+  U_red   = {iv -> 0d | iv < [n, n2]};
+  U_black = {iv -> 0d | iv < [n, n2]};
+  pi      = 4d * atan(1d);
+  omega   = 2d / (1d + sin(pi * h));
+  error   = 1e308;
+  t       = 0;
+  while (error > eps && t < max_iter) {
+    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
+    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+    error = L2_rb(F_red - Au_red, F_black - Au_black) /
+              L2_rb(F_red, F_black);
+    t++;
   }
-
-  return (u_red, u_black);
+  return (U_red, U_black);
 }
 
 inline
+double[m, n], double[m, n] zero_rb(int m, int n)
+{
+  zero = {iv -> 0d | iv < [m, n]};
+  return (zero, zero);
+}
+
+/* Cost is cut by a factor 4 every recursive call, meaning we do not need
+ * to specialize too deeply. Doing this and noinline helps cut compilation
+ * time and binary size. */
+specialize double[16384, 8192], double[16384, 8192] v_cycle(double[16384, 8192] U_red, double[16384, 8192] U_black, double[16384, 8192] F_red, double[16384, 8192] F_black, double h);
+specialize double[8192, 4096], double[8192, 4096] v_cycle(double[8192, 4096] U_red, double[8192, 4096] U_black, double[8192, 4096] F_red, double[8192, 4096] F_black, double h);
+noinline
 double[n, n2] , double[n, n2] 
-v_cycle(double[n, n2] F_red, double[n, n2] F_black, double h)
+v_cycle(double[n, n2] U_red, double[n, n2] U_black,
+        double[n, n2] F_red, double[n, n2] F_black, double h)
 {
   if (n <= 128) {
-    pi = 4d * atan(1d);
-    spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
-    /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
-       For now, changed the 2 to 200. */
-    iter = toi(200d * log(h) / log(spectral_radius));
-    U_red, U_black = sor_solve(F_red, F_black, h, iter);
+    U_red, U_black = sor_solve(F_red, F_black, h, h * h, 10000);
   } else {
-    U_red = {iv -> 0d | iv < [n, n / 2]};
-    U_black = {iv -> 0d | iv < [n, n / 2]};
-    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
+    for (i = 0; i < 3; i++) {
+      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
+    }
 
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
     r_red = Au_red - F_red;
     r_black = Au_black - F_black;
     r2h_red, r2h_black = restrict_rb(r_red, r_black);
-    error2h_red, error2h_black = v_cycle(r2h_red, r2h_black, 2d * h);
+    error2h_red, error2h_black = zero_rb(n / 2, n2 / 2);
+    error2h_red, error2h_black = v_cycle(error2h_red, error2h_black,
+                                         r2h_red, r2h_black, 2d * h);
     error_red, error_black = prolongate_rb(error2h_red, error2h_black);
     U_red = U_red - error_red;
     U_black = U_black - error_black;
 
-    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
+    for (i = 0; i < 3; i++) {
+      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
+    }
   }
 
   return (U_red, U_black);
 }
 
-int main()
+void print_error(double[n, n2] U_red, double[n, n2] U_black, 
+                 double[n, n2] F_red, double[n, n2] F_black,
+                 double h, string error_message)
 {
-  i_init = getInterval("init", 2);
-
-  start(i_init);
   pi = 4d * atan(1d);
   a = 0d;
   b = 2d * pi;
-  n = 16384;
-  h = (b - a) / tod(n);
 
-  iter = toi(log(tod(n)));
+  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
+  error = L2_rb(F_red - Au_red, F_black - Au_black) /
+            L2_rb(F_red, F_black);
+
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  Utrue_red, Utrue_black = to_red_black(Utrue);
+  backward_error = L2_rb(Utrue_red - U_red, Utrue_black - U_black) /
+                      L2_rb(Utrue_red, Utrue_black);
+
+  printf("n = %d, forward error %s is %e, backward %e\n", 
+          n, 
+          error_message, 
+          error,
+          backward_error);
+}
+
+noinline
+double[n, n2] , double[n, n2] 
+fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
+{
+    pi = 4d * atan(1d);
+    a = 0d;
+    b = 2d * pi;
+
+    small_n = 128;
+    small_h = h * tod(n / small_n);
+    F = from_red_black(F_red, F_black);
+    small_F = {iv -> F[iv * (n / small_n)]
+                  | iv < [small_n, small_n]};
+    small_F_red, small_F_black = to_red_black(small_F);
+
+    U_red, U_black = sor_solve(small_F_red, small_F_black, small_h, 
+                               small_h * small_h, 10000);
+    print_error(U_red, U_black, small_F_red, small_F_black, small_h, 
+                "SOR solve");
+
+    do {
+      small_n *= 2;
+      small_h /= 2d;
+  
+      prolongate_F_red, prolongate_F_black = prolongate_rb(small_F_red, 
+                                                           small_F_black);
+
+
+      small_F = {iv -> F[iv * (n / small_n)]
+                    | iv < [small_n, small_n]};
+      small_F_red, small_F_black = to_red_black(small_F);
+
+      printf("Prolongation error in F is %e\n", 
+              L2_rb(small_F_red - prolongate_F_red, 
+                    small_F_black - prolongate_F_black) /
+              L2_rb(small_F_red, small_F_black));
+
+      U_red, U_black = prolongate_rb(U_red, U_black);
+      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "prolongate");
+      U_red, U_black = v_cycle(U_red, U_black, 
+                               small_F_red, small_F_black, 
+                               small_h);
+      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "v-cycle");
+    } while (small_n < n);
+
+    return (U_red, U_black);
+}
+
+int main()
+{
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+  n = 4096;
+  h = (b - a) / tod(n);
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
   F_red, F_black = to_red_black(F);
 
-  end(i_init);
-  time, unit = returnResultUnit(i_init);
-  printf("Initialisation took %lf %s\n", time, unit);
-
-  i_v = getInterval("v", 2);
-  start(i_v);
-  U_red, U_black = v_cycle(F_red, F_black, h);
-  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-  r_red = F_red - Au_red;
-  r_black = F_black - Au_black;
-  for (t = 1; t < iter; t++) {
-    corr_red, corr_black = v_cycle(r_red, r_black, h);
-    U_red   = U_red + corr_red;
-    U_black = U_black + corr_black;
-    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    r_red = F_red - Au_red;
-    r_black = F_black - Au_black;
-  }
-  end(i_v);
-
-  time, unit = returnResultUnit(i_v);
-  printf("Solving %lf GB took %lf %s.\n", 
-         1.3333 * 3d * 8d * tod(n) * tod(n) / 1e9, // geometric series, U, F, r
-         time,
-         unit);
-
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
-  Utrue_red, Utrue_black = to_red_black(Utrue);
-  printf("Actual relative error %e\n", 
-            L2_rb(U_red - Utrue_red, U_black - Utrue_black) / 
-              L2_rb(Utrue_red, Utrue_black));
+  U_red, U_black = fmg(F_red, F_black, h);
 
   return 0;
 }

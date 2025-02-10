@@ -225,24 +225,21 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
 }
 
 inline
-double[n, n2], double[n, n2] 
-sor_solve(double[n, n2] F_red, double[n, n2] F_black, 
-          double h, double eps, int max_iter)
+double[n, m], double[n, m] sor_solve(double[n, m] f_red, double[n, m] f_black,
+                                     double h, int max_iter)
+  | (n == 2 * m && m % 2 == 0)
 {
-  U_red   = {iv -> 0d | iv < [n, n2]};
-  U_black = {iv -> 0d | iv < [n, n2]};
-  pi      = 4d * atan(1d);
-  omega   = 2d / (1d + sin(pi * h));
-  error   = 1e308;
-  t       = 0;
-  while (error > eps && t < max_iter) {
-    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
-    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    error = L2_rb(F_red - Au_red, F_black - Au_black) /
-              L2_rb(F_red, F_black);
-    t++;
+  u_red   = {iv -> 0d | iv < [n, m]};
+  u_black = {iv -> 0d | iv < [n, m]};
+
+  pi    = 4d * atan(1d);
+  omega = 2d / (1d + sin(pi * h));
+
+  for (t = 0; t < max_iter; t++) {
+    u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
   }
-  return (U_red, U_black);
+
+  return (u_red, u_black);
 }
 
 inline
@@ -263,11 +260,14 @@ v_cycle(double[n, n2] U_red, double[n, n2] U_black,
         double[n, n2] F_red, double[n, n2] F_black, double h)
 {
   if (n <= 128) {
-    U_red, U_black = sor_solve(F_red, F_black, h, h * h, 10000);
+    pi = 4d * atan(1d);
+    spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
+    /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
+       For now, changed the 2 to 200. */
+    iter = toi(200d * log(h) / log(spectral_radius));
+    U_red, U_black = sor_solve(F_red, F_black, h, iter);
   } else {
-    for (i = 0; i < 3; i++) {
-      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
-    }
+    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
 
     Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
     r_red = Au_red - F_red;
@@ -280,40 +280,11 @@ v_cycle(double[n, n2] U_red, double[n, n2] U_black,
     U_red = U_red - error_red;
     U_black = U_black - error_black;
 
-    for (i = 0; i < 3; i++) {
-      U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
-    }
+    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, 2d / 3d);
   }
 
   return (U_red, U_black);
 }
-
-#ifdef PRINT_CONVERGENCE
-void print_error(double[n, n2] U_red, double[n, n2] U_black, 
-                 double[n, n2] F_red, double[n, n2] F_black,
-                 double h, string error_message)
-{
-  pi = 4d * atan(1d);
-  a = 0d;
-  b = 2d * pi;
-
-  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-  error = L2_rb(F_red - Au_red, F_black - Au_black) /
-            L2_rb(F_red, F_black);
-
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
-  Utrue_red, Utrue_black = to_red_black(Utrue);
-  backward_error = L2_rb(Utrue_red - U_red, Utrue_black - U_black) /
-                      L2_rb(Utrue_red, Utrue_black);
-
-  printf("n = %d, forward error %s is %e, backward %e\n", 
-          n, 
-          error_message, 
-          error,
-          backward_error);
-}
-#endif
 
 noinline
 double[n, n2] , double[n, n2] 
@@ -336,12 +307,12 @@ fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
                       [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
                              | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
 
-    U_red, U_black = sor_solve(small_F_red, small_F_black, small_h, 
-                               small_h * small_h, 10000);
-#ifdef PRINT_CONVERGENCE
-    print_error(U_red, U_black, small_F_red, small_F_black, small_h, 
-                "SOR solve");
-#endif
+    pi = 4d * atan(1d);
+    spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
+    /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
+       For now, changed the 2 to 200. */
+    iter = toi(200d * log(small_h) / log(spectral_radius));
+    U_red, U_black = sor_solve(small_F_red, small_F_black, small_h, iter);
 
     do {
       small_n *= 2;
@@ -358,27 +329,13 @@ fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
                                | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
 
       U_red, U_black = prolongate_rb(U_red, U_black);
-#ifdef PRINT_CONVERGENCE
-      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "prolongate");
-#endif
       U_red, U_black = v_cycle(U_red, U_black, 
                                small_F_red, small_F_black, 
                                small_h);
-#ifdef PRINT_CONVERGENCE
-      print_error(U_red, U_black, small_F_red, small_F_black, small_h, "v-cycle");
-      printf("\n");
-#endif
     } while (small_n < n / 2);
 
     U_red, U_black = prolongate_rb(U_red, U_black);
-#ifdef PRINT_CONVERGENCE
-    print_error(U_red, U_black, F_red, F_black, h, "prolongate");
-#endif
     U_red, U_black = v_cycle(U_red, U_black, F_red, F_black, h);
-#ifdef PRINT_CONVERGENCE
-    print_error(U_red, U_black, F_red, F_black, h, "v-cycle");
-    printf("\n");
-#endif
 
     return (U_red, U_black);
 }
@@ -405,21 +362,6 @@ int main()
   i_v = getInterval("v", 2);
   start(i_v);
   U_red, U_black = fmg(F_red, F_black, h);
-  Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-  r_red = F_red - Au_red;
-  r_black = F_black - Au_black;
-  rel_err = L2_rb(r_red, r_black) / L2_rb(F_red, F_black);
-  printf("Relative residual norm = %e\n", rel_err);
-  do {
-    corr_red, corr_black = fmg(r_red, r_black, h);
-    U_red   = U_red + corr_red;
-    U_black = U_black + corr_black;
-    Au_red, Au_black = stencil_rb(U_red, U_black, [-4d, 1d] / (h * h));
-    r_red = F_red - Au_red;
-    r_black = F_black - Au_black;
-    rel_err = L2_rb(r_red, r_black) / L2_rb(F_red, F_black);
-    printf("Relative residual norm = %e\n", rel_err);
-  } while (rel_err > h * h);
   end(i_v);
 
   time, unit = returnResultUnit(i_v);

@@ -1,0 +1,111 @@
+use StdIO: all;
+use Math: all;
+use Array: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+/**
+ * w[0] is for elements with manhattan distance 0,
+ * w[1] is for elements with manhattan distance 1.
+ **/
+inline
+double[n] stencil_rb(double[n] x, double[2] w)
+{
+  shp = shape(x);
+#if 0
+  return with {
+            ([0    ] <= [i] < [n / 2]): 
+                          w[0] * x[n / 2 + mod(i - 1, n / 2)] +
+                          w[1] * x[i] +
+                          w[2] * x[i + n / 2];
+            ([n / 2] <= [i] < [n    ]):
+
+         }: genarray([n], 0d);{[i] ->               | [0    ] <= [i] < [n / 2];
+          [i] -> w[0] * x[i - n / 2] +
+                 w[1] * x[i] +
+                 w[2] * x[mod(i + 1, n / 2)]
+              | [n / 2] <= [i] < [n]};
+#else
+  easy = {iv -> w[0] * x[iv] + w[1] * x[mod(iv + shp / 2, shp)] | iv < shp}; 
+
+  hard = {iv -> w[1] * x[n / 2 + mod(iv - 1, shp / 2)]
+               | iv < shp / 2;
+          iv -> w[1] * x[        mod(iv + 1, shp / 2)]
+               | iv < shp};
+
+  return easy + hard;
+#endif
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x) / prod(tod(shp)));
+}
+
+double[n, n] to_red_black(double[n, n] x)
+{
+  y = reshape([n / 2, 2, n / 2, 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+double[n, n] from_red_black(double[n, n] x)
+{
+  y = reshape([2, n / 2, 2, n / 2], x);
+  z = {[i, j, k, l] -> y[j, i, l, k]};
+  return reshape([n, n], z);
+}
+
+
+double[n] to_red_black(double[n] x)
+{
+  y = reshape([n / 2, 2], x);
+  z = {[i, j] -> y[j, i]};
+  return reshape([n], z);
+}
+
+double[n] from_red_black(double[n] x)
+{
+  y = reshape([2, n / 2], x);
+  z = {[i, j] -> y[j, i]};
+  return reshape([n], z);
+}
+
+int main()
+{
+  n = 128;
+
+#if 0
+  U = {[i, j] -> tod(10 * i + j) | [i, j] < [n, n]};
+
+  U1 = stencil([[1d, 2d, 3d],
+                [4d, 5d, 6d],
+                [7d, 8d, 9d]], U);
+
+  U_rb = to_red_black(U);
+  U1_rb = stencil_rb([[1d, 2d, 3d],
+                     [4d, 5d, 6d],
+                     [7d, 8d, 9d]], U_rb);
+  check = from_red_black(U1_rb);
+#else
+  U = tod(iota(n));
+  U1 = stencil(U, [1d, -2d, 1d]);
+
+  U_rb = to_red_black(U);
+  U1_rb = stencil_rb(U_rb, [-2d, 1d]);
+  check = from_red_black(U1_rb);
+#endif
+
+  if (all(check == U1)) {
+    printf("Correct\n");
+  } else {
+    printf("Incorrect\n");
+  }
+
+  return 0;
+}

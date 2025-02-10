@@ -12,26 +12,7 @@
 use StdIO: all;
 use Math: all;
 use Array: all;
-
-inline
-double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
-{
-  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
-             | iv < shp};
-}
-
-/**
- * For 3D, we would have four partitions, starting at 
- * [0, 0, 0], [0, 1, 0], [1, 0, 0], [1, 1, 0].
- **/
-inline
-double[n, m] stencil_even_odd(double[n, m] x, double[3, 3] we, double[3, 3] wo)
-{
-  return {iv -> sum({jv -> we[jv] * x[mod(iv + jv - shape(we) / 2, shape(x))]})
-             | [0, 0] <= iv < [n, m] step [2, 1];
-          iv -> sum({jv -> wo[jv] * x[mod(iv + jv - shape(wo) / 2, shape(x))]})
-             | [1, 0] <= iv < shape(x) step [2, 1]};
-}
+use Benchmarking: all;
 
 double f(double x, double y)
 {
@@ -43,38 +24,73 @@ double u(double x, double y)
   return sin(x + y);
 }
 
-double L2_rb(double[d:shp] x, double[d:shp] y)
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
 {
-  return sqrt((sum(x * x) + sum(y * y)) / (2d * prod(tod(shp))));
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
 }
 
-inline
-double[n, m], double[n, m] to_red_black(double[n, n] x)
+double[n, n2], double[n, n2] to_red_black(double[n, n] x)
+  | (n2 == n / 2)
 {
-  black = {[i, j] -> x[i, 2 * j    ] 
-                   | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
-           [i, j] -> x[i, 2 * j + 1] 
-                   | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
-  red = {[i, j] -> x[i, 2 * j + 1] 
-                 | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
-         [i, j] -> x[i, 2 * j    ] 
-                 | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+  black = {[i, j] -> x[i, 2 * j] 
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * j - 1] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
+
+  red   = {[i, j] -> x[i, 2 * j + 1]
+                  | [0, 0] <= [i, j] < [n, n / 2] step [2, 1];
+           [i, j] -> x[i, n - 2 * (j + 1)] 
+                  | [1, 0] <= [i, j] < [n, n / 2] step [2, 1]};
 
   return (red, black);
 }
 
-inline 
-double[n, n] from_red_black(double[n, m] red, double[n, m] black)
+double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
+  | (n2 == n / 2)
 {
-  x = {[i, j] -> black[i, j / 2]
-              | [0, 0] <= [i, j] < [n, n] step [2, 2];
-       [i, j] -> black[i, j / 2]
-              | [1, 1] <= [i, j] < [n, n] step [2, 2];
-       [i, j] -> red[i, j / 2]
-              | [0, 1] <= [i, j] < [n, n] step [2, 2];
-       [i, j] -> red[i, j / 2]
-              | [1, 0] <= [i, j] < [n, n] step [2, 2]};
-  return x;
+  return with {
+            ([0, 0] <= [i, j] < [n, n] step [2, 2]): black[i, j / 2];
+            ([0, 1] <= [i, j] < [n, n] step [2, 2]): red  [i, j / 2];
+            ([1, 0] <= [i, j] < [n, n] step [2, 2]): red  [i, (n - j - 1) / 2];
+            ([1, 1] <= [i, j] < [n, n] step [2, 2]): black[i, (n - j) / 2];
+         }: genarray([n, n], 0d);
+}
+
+/**
+ * Weights are Manhattan distance to the central point, so equivalent to
+ * weights [w[1], w[0], w[1]] in the more general case.
+ **/
+inline
+double[n, n2], double[n, n2] 
+stencil_rb(double[n, n2] x_red, double[n, n2] x_black, double[2] w)
+{
+  res_black = w[0] * x_black +
+              w[1] * {[i, j] -> x_red[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_red[mod([i    , j         ], [n, n2])] +
+                                x_red[mod([i    , j  - 1    ], [n, n2])] +
+                                x_red[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+
+  res_red   = w[0] * x_red +
+              w[1] * {[i, j] -> x_black[mod([i - 1, n2 - 1 - j], [n, n2])] +
+                                x_black[mod([i    , j         ], [n, n2])] +
+                                x_black[mod([i    , j  + 1    ], [n, n2])] +
+                                x_black[mod([i + 1, n2 - 1 - j], [n, n2])]
+                              | [i, j] < [n, n2]};
+ 
+  return (res_red, res_black);
+}
+
+double L2_rb(double[d:shp] x, double[d:shp] y)
+{
+  return sqrt(sum(x * x) + sum(y * y));
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x));
 }
 
 inline
@@ -83,76 +99,83 @@ double[n, m], double[n, m] sor(double[n, m] u_red, double[n, m] u_black,
                                double h, double omega)
   | (n == 2 * m && m % 2 == 0)
 {
-  /** 
-   * TODO: can we express this as a single stencil?
-   * Probably not, higher-dimensional Laplacian's are tensor products of
-   * 1D Laplacians. We can see the RB ordering as an isomorphism
-   *    R^n <-> R^(n / 2) \oplus R^(n / 2)
-   * that corresponds with the cyclic-block ordering.
-   *
-   * So the tensor product becomes
-   *    R^n \otimes <-> \bigotimes (R^(n / 2) \oplus R^(n / 2)) <->
-   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
-   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
-   *    (R^(n / 2) \otimes R^(n / 2)) \oplus 
-   *    (R^(n / 2) \otimes R^(n / 2))
-   *
-   * So we really have four pure tensor products (the 5-point stencil is
-   * the tensor product of the 1D stencil [1, 2, 1]).
-   * The current implementation distributes the tensor product differently,
-   * getting only two direct-sums. But the direct sum of two tensor products of
-   * stencils is not necessarily a tensor product itself.
-   **/
-  w_left  = [[0d, 1d, 0d],
-             [1d, 1d, 0d],
-             [0d, 1d, 0d]];
-  w_right = [[0d, 1d, 0d],
-             [0d, 1d, 1d],
-             [0d, 1d, 0d]];
+  update_red = {[i, j] -> u_red[mod([i - 1, m - 1 - j], [n, m])] +
+                          u_red[mod([i    , j        ], [n, m])] +
+                          u_red[mod([i    , j  - 1   ], [n, m])] +
+                          u_red[mod([i + 1, m - 1 - j], [n, m])]
+                       | [i, j] < [n, m]};
 
-  update_red = stencil_even_odd(u_red, w_left, w_right);
   u_black = (1d - omega) * u_black +
             omega / 4d * (update_red - h * h * f_black);
 
-  update_black = stencil_even_odd(u_black, w_right, w_left);
+  update_black = {[i, j] -> u_black[mod([i - 1, m - 1 - j], [n, m])] +
+                            u_black[mod([i    , j        ], [n, m])] +
+                            u_black[mod([i    , j  + 1   ], [n, m])] +
+                            u_black[mod([i + 1, m - 1 - j], [n, m])]
+                         | [i, j] < [n, m]};
+
   u_red = (1d - omega) * u_red +
           omega / 4d * (update_black - h * h * f_red);
 
   return (u_red, u_black);
 }
 
-int main()
+inline
+double[n, m], double[n, m] sor_solve(double[n, m] f_red, double[n, m] f_black,
+                                     double h, int max_iter)
+  | (n == 2 * m && m % 2 == 0)
 {
-  pi = 4d * atan(1d);
-  a = 0d;
-  b = 2d * pi;
-  n = 2048;
-  h = (b - a) / tod(n);
-
-  F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
-              | [i, j] < [n, n]};
-  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
-                  | [i, j] < [n, n]};
-  U = {[i, j] -> 0d | [i, j] < [n, n]};
-
-  U_red, U_black = to_red_black(U);
-  F_red, F_black = to_red_black(F);
-  Utrue_red, Utrue_black = to_red_black(Utrue);
+  u_red   = {iv -> 0d | iv < [n, m]};
+  u_black = {iv -> 0d | iv < [n, m]};
 
   pi    = 4d * atan(1d);
   omega = 2d / (1d + sin(pi * h));
-  i     = 0;
-  error = 1e308;
-  while (error > 1e-6)
-  {
-    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
-    if (i % 100 == 0) {
-      error = L2_rb(U_red - Utrue_red, U_black - Utrue_black) / 
-              L2_rb(Utrue_red, Utrue_black);
-      printf("Iter %d: relative error is %e\n", i, error);
-    }
-    i++;
+
+  for (t = 0; t < max_iter; t++) {
+    u_red, u_black = sor(u_red, u_black, f_red, f_black, h, omega);
   }
+
+  return (u_red, u_black);
+}
+
+int main()
+{
+  i_sor = getInterval("sor", 2);
+  start(i_sor);
+
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+  n = 1024;
+  h = (b - a) / tod(n);
+  spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
+  /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
+     For now, changed the 2 to 200.
+   */
+  iter = toi(200d * log(h) / log(spectral_radius));
+  printf("%d iters\n", iter);
+
+  F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
+              | [i, j] < [n, n]};
+  F_red, F_black = to_red_black(F);
+  U = {[i, j] -> 0d | [i, j] < [n, n]};
+
+  U_red, U_black = sor_solve(F_red, F_black, h, iter);
+
+  end(i_sor);
+  time, unit = returnResultUnit(i_sor);
+  gb_moved = tod(iter) * 8d * 
+              (tod(_size_A_(F_red) + _size_A_(F_black)) +     // read
+              2d * tod(_size_A_(U_red) + _size_A_(U_black)))  // rfo and write
+              / 1e9;
+  printf("Bandwidth: %lf GB/s\n", gb_moved / time);
+
+  Utrue = {[i, j] -> u(a + tod(i) * h, a + tod(j) * h)
+                  | [i, j] < [n, n]};
+  Utrue_red, Utrue_black = to_red_black(Utrue);
+  printf("Relative error compared to true answer is %e\n",
+          L2_rb(U_red - Utrue_red, U_black - Utrue_black) / 
+          L2_rb(Utrue_red, Utrue_black));
 
   return 0;
 }

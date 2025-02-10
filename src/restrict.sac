@@ -18,6 +18,16 @@ double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
              | iv < shp};
 }
 
+//inline
+//double[n, n] stencil_far(double[n, n] x, double[3, 3] w)
+//{
+//  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+//             | iv < shp};
+//  return {iv -> sum({jv -> w[jv] * x[mod(iv + (jv - [1, 1]) * n / 2,
+//                                         [n / 2, n / 2])]
+//              | iv < [n / 2, n / 2]};
+//}
+
 double[n, n] to_red_black(double[n, n] x)
 {
   y = reshape([n / 2, 2, n / 2, 2], x);

@@ -45,6 +45,14 @@ double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
              | iv < shp};
 }
 
+inline
+double[n, n] stencil_rb(double[n, n] x, double[3, 3] w)
+{
+  shp = shape(x);
+  return {iv -> 
+             | iv < shp};
+}
+
 double L2(double[d:shp] x)
 {
   return sqrt(sum(x * x) / prod(tod(shp)));
@@ -67,44 +75,9 @@ double[n, n] from_red_black(double[n, n] x)
 inline
 double[n, n] five_point_rb(double[n, n] U, double h)
 {
-  BB = tile([n / 2, n / 2], [0, 0    ], U);
-  BR = tile([n / 2, n / 2], [0, n / 2], U);
-  RB = tile([n / 2, n / 2], [n / 2, 0    ], U);
-  RR = tile([n / 2, n / 2], [n / 2, n / 2], U);
-
-  res_BB = -4d * BB + stencil(BR, [[0d, 0d, 0d],
-                                   [1d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_BR = -4d * BR + stencil(BB, [[0d, 0d, 0d],
-                                   [0d, 1d, 1d],
-                                   [0d, 0d, 0d]]);
-
-  res_RB = -4d * RB + stencil(RR, [[0d, 1d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 0d, 0d]]);
-  res_RR = -4d * RR + stencil(RB, [[0d, 0d, 0d],
-                                   [0d, 1d, 0d],
-                                   [0d, 1d, 0d]]);
-  /* See issue 2445 */
-#if 0
-  res = {iv -> res_BB[iv - [0    , 0    ]]
-            | [0    , 0    ] <= iv < [n / 2, n / 2];
-         iv -> res_BR[iv - [0    , n / 2]]
-            | [0    , n / 2] <= iv < [n / 2, n    ];
-         iv -> res_RB[iv - [n / 2, 0    ]]
-            | [n / 2, 0    ] <= iv < [n    , n / 2];
-         iv -> res_RR[iv - [n / 2, n / 2]]
-            | [n / 2, n / 2] <= iv < [n    , n    ]};
-#else
-  res = with {
-          ([0    , 0    ] <= iv < [n / 2, n / 2]): res_BB[iv - [0    , 0    ]];
-          ([n / 2, 0    ] <= iv < [n    , n / 2]): res_BB[iv - [n / 2, 0    ]];
-          ([0    , n / 2] <= iv < [n / 2, n    ]): res_BB[iv - [0    , n / 2]];
-          ([n / 2, n / 2] <= iv < [n    , n    ]): res_BB[iv - [n / 2, n / 2]];
-        }: genarray([n, n], 0d);
-#endif
-
-  return res;
+  return stencil_rb(U, [[0d,  1d, 0d],
+                        [1d, -4d, 1d],
+                        [0d,  1d, 0d]]);
 }
 
 double f(double x, double y)

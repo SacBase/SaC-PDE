@@ -1,0 +1,84 @@
+use StdIO: all;
+use Array: all;
+
+double[n, n] to_red_black(double[n, n] x)
+{
+  return with {
+            ([0, 0] <= [i, j] < [n / 2, n / 2]): 
+                  x[2 * i, 2 * j];
+            ([n / 2, 0] <= [i, j] < [n, n / 2]): 
+                  x[2 * (n - i) - 1, 2 * j];
+            ([0, n / 2] <= [i, j] < [n / 2, n]): 
+                  x[2 * i, 2 * (n - j) - 1];
+            ([n / 2, n / 2] <= [i, j] < [n, n]): 
+                  x[2 * (n - i) - 1, 2 * (n - j) - 1];
+         }: genarray([n], 0d);
+}
+
+double[n, n] from_red_black(double[n, n] x)
+{
+  return {[i, j] -> x[i / 2        ] | [0, 0] <= iv < [n, n] step [2, 2];
+          [i, j] -> x[n - 1 - i / 2] | [1, 0] <= iv < [n, n] step [2, 2]};
+}
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+/**
+ * Weights are Manhattan distance to the central point, so equivalent to
+ * weights [w[1], w[0], w[1]] in the more general case.
+ **/
+inline
+double[n] stencil_rb(double[n] x, double[2] w)
+{
+  B = tile([n / 2], [0    ], x);
+  R = tile([n / 2], [n / 2], x);
+
+  res_B = (w[0] * B + reverse(stencil(R, [0d, w[1], w[1]])));
+  res_R = (w[0] * R + reverse(stencil(B, [0d, w[1], w[1]])));
+
+  return res_B ++ res_R;
+}
+
+inline
+double[n, n] stencil_rb(double[n, n] x, double[2] w)
+{
+  B = tile([n / 2], [0    ], x);
+  R = tile([n / 2], [n / 2], x);
+
+  res_B = (w[0] * B + reverse(stencil(R, [0d, w[1], w[1]])));
+  res_R = (w[0] * R + reverse(stencil(B, [0d, w[1], w[1]])));
+
+  return res_B ++ res_R;
+}
+
+int main()
+{
+  n = 132;
+
+  x = tod(iota(n));
+
+  y = from_red_black(to_red_black(x));
+  z = to_red_black(from_red_black(x));
+
+  if (all(x == y) && all(x == z)) {
+    printf("Isomorphism correct\n");
+  } else {
+    printf("Isomorphism false\n");
+  }
+
+  down          = stencil(x, [1d, -2d, 1d]);
+  rightdownleft = from_red_black(stencil_rb(to_red_black(x), [-2d, 1d]));
+
+  if (all(down == rightdownleft)) {
+    printf("Diagram commutes\n");
+  } else {
+    printf("Diagram does not commute\n");
+  }
+
+  return 0;
+}

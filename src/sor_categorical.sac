@@ -1,0 +1,102 @@
+/**
+ * This solves
+ *  u_xx + u_yy = f
+ * on Omega = [0, 1] x [0, 1]
+ * with periodic boundary conditions.
+ *
+ * The technique uses a Gauss-Seidel update with successive overrelaxation.
+ * We use red-black ordering so we can parallelise it. This is not exactly the 
+ * same as the sequential Gauss-Seidel, but the convergence is similar.
+ **/
+
+use StdIO: all;
+use Math: all;
+use Array: all;
+
+inline
+double[d:shp] stencil(double[d:shp] x, double[d:wshp] w)
+{
+  return {iv -> sum({jv -> w[jv] * x[mod(iv + jv - wshp / 2, shp)]})
+             | iv < shp};
+}
+
+double f(double x)
+{
+  return -sin(x);
+}
+
+double u(double x)
+{
+  return sin(x);
+}
+
+double L2(double[d:shp] x)
+{
+  return sqrt(sum(x * x));
+}
+
+/**
+ * We can view this as an isomorphism between block and cyclic distribution 
+ * over 2 processors.
+ **/
+inline
+double[two, m] to_red_black(double[n] x)
+| (two == 2 && two * m == n)
+{
+  return transpose(reshape([n / 2, 2], x));
+}
+
+inline 
+double[n] from_red_black(double[two, m] x)
+| (two == 2 && two * m == n)
+{
+  return reshape([two * m], transpose(x));
+}
+
+inline
+double[n] sor(double[n] u, double[n] f, double h, double omega)
+{
+  u_rb = to_red_black(u);
+  f_rb = to_red_black(f);
+
+  update_red = stencil(u_rb[1], [0d, 1d, 1d]);
+  u_rb[0] = (1d - omega) * u_rb[0] +
+            omega / 2d * (update_red - h * h * f_rb[0]);
+
+  update_black = stencil(u_rb[0], [1d, 1d, 0d]);
+  u_rb[1] = (1d - omega) * u_rb[1] +
+            omega / 4d * (update_black - h * h * f_rb[1]);
+
+  return from_red_black(u_rb);
+}
+
+int main()
+{
+  pi = 4d * atan(1d);
+  a = 0d;
+  b = 2d * pi;
+  n = 8;
+  h = (b - a) / tod(n);
+
+  F = {[i] -> f(a + tod(i) * h) | [i] < [n]};
+  Utrue = {[i] -> u(a + tod(i) * h) | [i] < [n]};
+  U = {[i] -> 0d | [i] < [n]};
+
+  pi    = 4d * atan(1d);
+  omega = 2d / (1d + sin(pi * h));
+  i     = 0;
+  error = 1e308;
+  while (error > 1e-6 && i < 10)
+  {
+    print(U);
+    U = sor(U, F, h, omega);
+//    U_red, U_black = sor(U_red, U_black, F_red, F_black, h, omega);
+    if (i % 100 == 0) {
+      error = L2(U - Utrue) / L2(Utrue);
+      printf("Iter %d: relative error is %e\n", i, error);
+    }
+    i++;
+  }
+
+  return 0;
+}

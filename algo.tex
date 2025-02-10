@@ -184,4 +184,88 @@ So
                       & +\frac{2}{\omega}\frac{\omega}{2} r_i \otimes r_{j - 1} \\
 \end{align*}
 
+\newpage
+
+\section{Stencil RB}
+
+What if $b_{i} = e_{2i}$ and $r_i = e_{n - (2i + 1)}$?
+
+\begin{align*}
+    b_i = e_{2i} \mapsto & e_{2i - 1} -2 e_{2i} + e_{2i + 1} \\
+                    & = e_{n - (n - 2i + 1)} -2 e_{2i} + e_{n - (n - 2i - 1)} \\
+                    & = e_{n - (2(n/2 - i) + 1)} - 2e_{2i}
+                        + e_{n - (2(n/2 - i - 1) + 1)} \\
+                    & = r_{n / 2 - i} -2 b_{i} + r_{n / 2 - i - 1}
+\end{align*}
+
+\begin{align*}
+    r_i = e_{n - (2i + 1)} \mapsto & e_{n - 2i - 2} -2 e_{n - (2i + 1)} + 
+                                     e_{n - 2i} \\
+                    & = e_{2(n / 2 - i - 1)} -2 e_{n - (2i + 1)} + 
+                                     e_{2(n / 2 - i)} \\
+                    & = b_{n / 2 - i - 1} -2 r_{i} + b_{n / 2 - i}
+\end{align*}
+
+\newpage
+
+Let $A$ be a finite element discretization of $f \mapsto \frac{d^2}{d x^2} f$.
+The Laplacian operator in higher dimensions consists of tensor product of $A$ 
+and identities. In 2D the Laplacian $\nabla$ is $A \otimes I + I \otimes A$. 
+I feel like a rank-polymorphic SaC program should exist for solving 
+$\nabla u = f$ for $u$.
+
+Methods for solving this equation are based on splitting $A = M - N$ for 
+suitable maps $M$ and $N$ and then iteratively updating 
+$u^{(k + 1)} = M^{-1}(Nu^{(k)} + f)$. In categorical terms, they use (co)products
+in the following way. Let $V$ be a $n$-dimensional vector space, 
+and let $B$(lack), $R$(ed) be $n / 2$-dimensional vector spaces. If we can find
+an isomorphism $\sigma$ such that the following diagram commutes,
+we can compose them so we don't have to explicitly compute $\sigma$, except for
+$\sigma f$ and $\sigma^{-1}u$ on the final solution. The structure on the
+right-hand side allows for an easily invertible $M$.
+
+\begin{tikzcd}
+    V \arrow[d, "A"'] \arrow[r, "\sigma"] & B \oplus R \arrow[d, "something\ nice"] \\
+    V \arrow[r, "\sigma"'] & B \oplus R \\
+\end{tikzcd}
+
+For $e$ basis $V$, $r$ basis $R$ and $b$ basis $B$, the standard choice is
+$b_i \mapsto e_{2i}$, $r_i \mapsto e_{2i + 1}$. 
+
+Tensor products distribute over direct sums, which gives a rank-polymorphic
+formulation for FFTs, so I hope that we can do something similar here. I am
+however less and less convinced that this works for the standard choice of 
+$\sigma$. Maybe we need $r_i \mapsto e_{n - (2i + 1)}$ instead of $e_{2i + 1}$.
+
+\newpage
+
+For $e$ basis $V$, $r$ basis $R$ and $b$ basis $B$, we define $\sigma$ by
+$b_i \mapsto e_{2i}$, $r_i \mapsto e_{n - (2i + 1)}$. 
+
+\begin{tikzcd}
+    V \arrow[d, "A"'] \arrow[r, "\sigma"] & B \oplus R \arrow[d, "A^{rb}"] \\
+    V \arrow[r, "\sigma"'] & B \oplus R \\
+\end{tikzcd}
+
+Here $A^{rb}$ is the unique morphism making the following diagram commute
+(the direct sum $\oplus$ is both product and coproduct in Vect).
+The function $S$ is a reversed stencil $x_{n - i} = w_1 (x_i + x_{i + 1})$.
+
+\begin{tikzcd}[column sep = huge, row sep = huge]
+    B \arrow[d, "w_0"'] \arrow[r, "\iota"] \arrow[drr, pos = 0.3, "S"] & 
+        B \oplus R \arrow[d, pos = 0.7, dotted, "A^{rb}"] &  
+        R \arrow[dll, pos = 0.3, "S"'] \arrow[d, "w_0"] \arrow[l, "\iota"'] \\
+    B & B \oplus R \arrow[r, "\pi"'] \arrow[l, "\pi"] & R
+\end{tikzcd}
+
+$A^{rb} \otimes I + I \otimes A^{rb}$
+
+$S[a, b, c] \otimes I + I \otimes S[d, e, f]$ becomes
+
+\begin{align*}
+    S[&[0,& d    , & 0], \\
+      &[a,& b + e, & c], \\
+      &[0,& f    , & 0]]
+\end{align*}
+
 \end{document}
