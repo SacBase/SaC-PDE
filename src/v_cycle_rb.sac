@@ -246,10 +246,11 @@ v_cycle(double[n, n2] F_red, double[n, n2] F_black, double h)
 {
   if (n <= 128) {
     pi = 4d * atan(1d);
-    spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
-    /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
-       For now, changed the 2 to 200. */
-    iter = toi(200d * log(h) / log(spectral_radius));
+    /* spectral_radius approx 1, so log is not stable */
+    log_spectral_radius = log1p(-2d * sin(pi * h) / (1d + sin(pi * h)));
+    /* Larger constant because convergence deteriorates significantly if omega
+       is not exactly optimal, and we do have roundoff errors. */
+    iter = toi(200d * log(h) / log_spectral_radius);
     U_red, U_black = sor_solve(F_red, F_black, h, iter);
   } else {
     U_red = {iv -> 0d | iv < [n, n / 2]};

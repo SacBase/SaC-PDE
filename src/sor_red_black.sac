@@ -146,14 +146,14 @@ int main()
   pi = 4d * atan(1d);
   a = 0d;
   b = 2d * pi;
-  n = 1024;
+  n = 2048;
   h = (b - a) / tod(n);
   spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
-  /* TODO: spectral_radius approx 1, which means the log is ill-conditioned.
-     For now, changed the 2 to 200.
-   */
-  iter = toi(200d * log(h) / log(spectral_radius));
-  printf("%d iters\n", iter);
+  /* spectral_radius approx 1, so log is not stable */
+  log_spectral_radius = log1p(-2d * sin(pi * h) / (1d + sin(pi * h)));
+  /* Larger constant because convergence deteriorates significantly if omega
+     is not exactly optimal, and we do have roundoff errors. */
+  iter = toi(200d * log(h) / log_spectral_radius);
 
   F = {[i, j] -> f(a + tod(i) * h, a + tod(j) * h)
               | [i, j] < [n, n]};
