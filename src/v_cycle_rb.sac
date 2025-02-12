@@ -240,7 +240,8 @@ double[n, m], double[n, m] sor_solve(double[n, m] f_red, double[n, m] f_black,
   return (u_red, u_black);
 }
 
-inline
+specialize double[16384, 8192], double[16384, 8192] v_cycle(double[16384, 8192] F_red, double[16384, 8192] F_black, double h);
+specialize double[8192, 4096], double[8192, 4096] v_cycle(double[8192, 4096] F_red, double[8192, 4096] F_black, double h);
 double[n, n2] , double[n, n2] 
 v_cycle(double[n, n2] F_red, double[n, n2] F_black, double h)
 {

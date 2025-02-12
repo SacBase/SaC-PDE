@@ -146,7 +146,7 @@ int main()
   pi = 4d * atan(1d);
   a = 0d;
   b = 2d * pi;
-  n = 2048;
+  n = 1024;
   h = (b - a) / tod(n);
   spectral_radius = 2d / (1d + sin(pi * h)) - 1d;
   /* spectral_radius approx 1, so log is not stable */

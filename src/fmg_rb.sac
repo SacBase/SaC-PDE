@@ -107,7 +107,6 @@ restrict_rb(double[n, m] x_red, double[n, m] x_black)
 #endif
 }
 
-inline
 double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   | (n2 == n / 2)
 {
@@ -124,7 +123,7 @@ double[n, n2], double[n, n2] to_red_black(double[n, n] x)
   return (red, black);
 }
 
-noinline
+inline
 double[n, n] from_red_black(double[n, n2] red, double[n, n2] black)
   | (n2 == n / 2)
 {
