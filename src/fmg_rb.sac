@@ -303,9 +303,9 @@ fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
                      [i, j] -> F_black[i * factor, (n - factor) / 2 - j * factor]
                             | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
     small_F_red   = {[i, j] -> F_black[i * factor, (2 * j + 1) * factor / 2]
-                             | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
-                      [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
-                             | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+                            | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                     [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
+                            | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
 
     pi = 4d * atan(1d);
     /* spectral_radius approx 1, so log is not stable */
@@ -316,28 +316,34 @@ fmg(double[n, n2] F_red, double[n, n2] F_black, double h)
     iter = toi(200d * log(small_h) / log_spectral_radius);
     U_red, U_black = sor_solve(small_F_red, small_F_black, small_h, iter);
 
-    do {
-      small_n *= 2;
-      small_h /= 2d;
-      factor  /= 2;
-  
-      small_F_black = {[i, j] -> F_black[i * factor, j * factor] 
-                              | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
-                       [i, j] -> F_black[i * factor, (n - factor) / 2 - j * factor]
-                              | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
-      small_F_red   = {[i, j] -> F_black[i * factor, (2 * j + 1) * factor / 2]
-                               | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
-                        [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
-                               | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+    /* Some annoying case distinctions if small_n is close to n as we have
+       to check if we are done, and then if we have to project F down on
+       a smaller grid. */
+    if (small_n <= n / 4) {
+      do {
+        small_n *= 2;
+        small_h /= 2d;
+        factor  /= 2;
+        small_F_black = {[i, j] -> F_black[i * factor, j * factor] 
+                                | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                         [i, j] -> F_black[i * factor, (n - factor) / 2 - j * factor]
+                                | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
+        small_F_red   = {[i, j] -> F_black[i * factor, (2 * j + 1) * factor / 2]
+                                 | [0, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1];
+                          [i, j] -> F_black[i * factor, n / 2 - (j + 1) * factor] 
+                                 | [1, 0] <= [i, j] < [small_n, small_n / 2] step [2, 1]};
 
-      U_red, U_black = prolongate_rb(U_red, U_black);
-      U_red, U_black = v_cycle(U_red, U_black, 
-                               small_F_red, small_F_black, 
-                               small_h);
-    } while (small_n < n / 2);
+        U_red, U_black = prolongate_rb(U_red, U_black);
+        U_red, U_black = v_cycle(U_red, U_black, 
+                                 small_F_red, small_F_black, 
+                                 small_h);
+      } while (small_n < n / 2);
+    }
 
-    U_red, U_black = prolongate_rb(U_red, U_black);
-    U_red, U_black = v_cycle(U_red, U_black, F_red, F_black, h);
+    if (small_n == n / 2) {
+        U_red, U_black = prolongate_rb(U_red, U_black);
+        U_red, U_black = v_cycle(U_red, U_black, F_red, F_black, h);
+    }
 
     return (U_red, U_black);
 }
